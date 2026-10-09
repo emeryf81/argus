@@ -165,7 +165,7 @@
 
   // ---------------------------------------------------------------- 1) the shop page you are looking at
   function report() {
-    if (!HA() || !TOKEN()) { if (!GM_getValue("hinted", false)) { GM_setValue("hinted", true); note({{tj:B.R.I.C.K.: set your token via the Tampermonkey menu → ARGUS settings}}, false); } return; }
+    if (!HA() || !TOKEN()) { if (!GM_getValue("hinted", false)) { GM_setValue("hinted", true); note({{tj:ARGUS: set your token via the Tampermonkey menu → ARGUS settings}}, false); } return; }
     const price = priceOf(document, location.hostname);
     if (!price) return;
     const key = "sent:" + location.pathname, last = GM_getValue(key, 0);

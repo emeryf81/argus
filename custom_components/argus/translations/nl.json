@@ -1,0 +1,359 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ARGUS",
+        "description": "De meeste instellingen staan ook in het paneel: Beheer → Instellingen.",
+        "data": {
+          "discount_threshold": "Kortingsdrempel",
+          "retailers": "Winkels",
+          "language": "Taal",
+          "refresh_mode": "Prijscontroles",
+          "spread_hours": "Cyclus",
+          "watch_cycle_min": "Prioriteitscyclus",
+          "refresh_times": "Vaste tijden",
+          "digest_time": "Dagelijkse samenvatting",
+          "min_history_days": "Historiek voor 'laagste tot nu toe'",
+          "use_impersonation": "Chrome nabootsen",
+          "notify_service": "Notify-service"
+        },
+        "data_description": {
+          "discount_threshold": "Vanaf deze korting telt een prijs als goede prijs.",
+          "retailers": "De winkels die gecontroleerd worden.",
+          "language": "Paneel, meldingen en userscript.",
+          "refresh_mode": "Gespreid: elk product eens per cyclus, vriendelijk voor de winkels.",
+          "spread_hours": "Elk product eens per … uur.",
+          "watch_cycle_min": "Producten met hoge prioriteit (★★ en ★★★) kunnen vaker gecontroleerd worden.",
+          "refresh_times": "Bv. 07:30, 19:30.",
+          "digest_time": "Tijdstip van de dagelijkse samenvatting.",
+          "min_history_days": "Aantal dagen prijzen voordat 'laagste tot nu toe' telt.",
+          "use_impersonation": "curl_cffi: veel minder blokkades.",
+          "notify_service": "Optioneel; het tabblad Meldingen in het paneel is beter."
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Al geconfigureerd"
+    },
+    "error": {
+      "invalid_times": "Geef 1 tot 6 tijden als UU:MM, gescheiden door komma's"
+    }
+  },
+  "selector": {
+    "refresh_mode": {
+      "options": {
+        "spread": "Gespreid over de dag",
+        "times": "Op vaste tijden",
+        "off": "Uit"
+      }
+    },
+    "cycle": {
+      "options": {
+        "2": "2 h",
+        "3": "3 h",
+        "4": "4 h",
+        "6": "6 h",
+        "12": "12 h",
+        "24": "24 h"
+      }
+    },
+    "watch_cycle": {
+      "options": {
+        "0": "Zoals de andere producten",
+        "30": "30 min",
+        "60": "1 h",
+        "120": "2 h",
+        "180": "3 h",
+        "240": "4 h",
+        "360": "6 h",
+        "720": "12 h",
+        "1440": "24 h"
+      }
+    },
+    "category": {
+      "options": {
+        "electronics": "Elektronica",
+        "books": "Boeken",
+        "toys_games": "Speelgoed & games",
+        "home_garden_diy": "Huis, tuin & doe-het-zelf",
+        "other": "Overig"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "tracked_products": {
+        "name": "Gevolgde producten"
+      },
+      "all_time_lows": {
+        "name": "Producten aan laagste prijs tot nu toe"
+      },
+      "price_drops": {
+        "name": "Producten met prijsdaling"
+      },
+      "targets_reached": {
+        "name": "Producten aan streefprijs"
+      },
+      "basket_cost": {
+        "name": "Kost van alles (beste prijzen)"
+      },
+      "basket_saving": {
+        "name": "Besparing t.o.v. referentieprijzen"
+      },
+      "offers_with_errors": {
+        "name": "Aanbiedingen met fouten"
+      },
+      "best_deal": {
+        "name": "Beste dealscore"
+      }
+    }
+  },
+  "services": {
+    "add_product": {
+      "name": "Product toevoegen",
+      "description": "Voeg een product toe via het adres van een productpagina (of via naam/barcode); ARGUS zoekt het bij de andere winkels van zijn categorie.",
+      "fields": {
+        "url": {
+          "name": "Adres",
+          "description": "Adres van een productpagina bij een van je winkels."
+        },
+        "name": {
+          "name": "Naam",
+          "description": "Naam van het product."
+        },
+        "ean": {
+          "name": "Barcode",
+          "description": "EAN of ISBN."
+        },
+        "brand": {
+          "name": "Merk",
+          "description": "Merk."
+        },
+        "model": {
+          "name": "Model",
+          "description": "Model- of artikelnummer."
+        },
+        "category": {
+          "name": "Categorie",
+          "description": "Categorie; bepaalt welke winkels doorzocht worden."
+        },
+        "reference_price": {
+          "name": "Referentieprijs",
+          "description": "Gebruikelijke of catalogusprijs."
+        },
+        "target_price": {
+          "name": "Streefprijs",
+          "description": "Je krijgt een melding onder deze prijs."
+        },
+        "priority": {
+          "name": "Prioriteit",
+          "description": "1 tot 3 sterren."
+        },
+        "notes": {
+          "name": "Notities",
+          "description": "Je notities."
+        }
+      }
+    },
+    "remove_product": {
+      "name": "Product verwijderen",
+      "description": "Stop met het volgen van een product.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product-id."
+        }
+      }
+    },
+    "find_shops": {
+      "name": "Het product bij andere winkels zoeken",
+      "description": "Zoek een product (of elk product) op bij de andere winkels van zijn categorie.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product-id; leeg = elk product (een achtergrondtaak)."
+        },
+        "force": {
+          "name": "Forceren",
+          "description": "Probeer ook gepauzeerde winkels."
+        }
+      }
+    },
+    "refresh": {
+      "name": "Prijzen verversen",
+      "description": "Haal nu de prijzen van één product op, of start een volledige ronde.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product-id; leeg = elk product (een achtergrondtaak)."
+        },
+        "force": {
+          "name": "Forceren",
+          "description": "Probeer ook gepauzeerde winkels."
+        }
+      }
+    },
+    "verify_links": {
+      "name": "Links controleren",
+      "description": "Beoordeel elke winkellink opnieuw (barcode, titel, prijs)."
+    },
+    "confirm_offer": {
+      "name": "Link goedkeuren",
+      "description": "Deze link is het juiste product.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product-id."
+        },
+        "retailer": {
+          "name": "Winkel",
+          "description": "Winkel-id."
+        }
+      }
+    },
+    "remove_offer": {
+      "name": "Link verwijderen",
+      "description": "Verwijder een winkellink (en blokkeer hem).",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product-id."
+        },
+        "retailer": {
+          "name": "Winkel",
+          "description": "Winkel-id."
+        },
+        "block": {
+          "name": "Blokkeren",
+          "description": "Koppel deze pagina nooit meer."
+        }
+      }
+    },
+    "set_offer": {
+      "name": "Link instellen",
+      "description": "Stel de link van een product bij een winkel met de hand in.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product-id."
+        },
+        "retailer": {
+          "name": "Winkel",
+          "description": "Winkel-id."
+        },
+        "url": {
+          "name": "Adres",
+          "description": "Adres van de productpagina."
+        }
+      }
+    },
+    "fix_offer": {
+      "name": "Link of prijs corrigeren",
+      "description": "Corrigeer de link en/of de prijs van een winkel met de hand.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product-id."
+        },
+        "retailer": {
+          "name": "Winkel",
+          "description": "Winkel-id."
+        },
+        "url": {
+          "name": "Adres",
+          "description": "Adres van de productpagina."
+        },
+        "price": {
+          "name": "Prijs",
+          "description": "Prijs die wint van de automatische."
+        }
+      }
+    },
+    "cancel_job": {
+      "name": "Taak stoppen",
+      "description": "Stop de lopende achtergrondtaak."
+    },
+    "export_products": {
+      "name": "Producten exporteren",
+      "description": "Je producten als CSV."
+    },
+    "export_data": {
+      "name": "Back-up exporteren",
+      "description": "Alles als back-up (JSON)."
+    },
+    "import_data": {
+      "name": "Back-up importeren",
+      "description": "Herstel een back-up.",
+      "fields": {
+        "data": {
+          "name": "Gegevens",
+          "description": "De back-up."
+        },
+        "file_path": {
+          "name": "Bestand",
+          "description": "Pad van een back-upbestand."
+        },
+        "merge": {
+          "name": "Samenvoegen",
+          "description": "Voeg toe aan wat je hebt in plaats van het te vervangen."
+        }
+      }
+    },
+    "import_products": {
+      "name": "Producten importeren",
+      "description": "Voeg de producten van een CSV-bestand een voor een toe.",
+      "fields": {
+        "csv_text": {
+          "name": "CSV-tekst",
+          "description": "De CSV."
+        },
+        "file_path": {
+          "name": "Bestand",
+          "description": "Pad van een CSV-bestand."
+        },
+        "discover": {
+          "name": "Bij andere winkels zoeken",
+          "description": "Zoek elk product op bij de andere winkels."
+        }
+      }
+    },
+    "report_price": {
+      "name": "Prijs melden",
+      "description": "Een elders gezien prijs (userscript, automatisering).",
+      "fields": {
+        "price": {
+          "name": "Prijs",
+          "description": "Prijs in euro."
+        },
+        "url": {
+          "name": "Adres",
+          "description": "Adres van de productpagina."
+        },
+        "product": {
+          "name": "Product",
+          "description": "Product-id."
+        },
+        "retailer": {
+          "name": "Winkel",
+          "description": "Winkel-id."
+        },
+        "title": {
+          "name": "Titel",
+          "description": "Titel van de pagina."
+        },
+        "via": {
+          "name": "Via",
+          "description": "Waar de prijs vandaan komt."
+        },
+        "gtins": {
+          "name": "Barcodes",
+          "description": "Barcodes (EAN/ISBN) die de pagina vermeldt."
+        }
+      }
+    },
+    "send_digest": {
+      "name": "Samenvatting sturen",
+      "description": "Stuur de dagelijkse samenvatting nu."
+    }
+  }
+}
