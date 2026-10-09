@@ -1205,5 +1205,19 @@
 "Electronics": "Électronique",
 "Books": "Livres",
 "Toys & games": "Jouets & jeux",
-"Home, garden & DIY": "Maison, jardin & bricolage"
+"Home, garden & DIY": "Maison, jardin & bricolage",
+"Finders": "Chercheurs",
+"Besides the shops' own search, ARGUS finds a product's page through a web search for “brand name shop” (the first results on the shop's domain) and through price-comparison sites, whose sponsored links lead to the shops too. Whatever they return is only a suggestion: the shop's own page is always fetched and checked (barcode, model number, title) before it is linked, and prices are always read from the shop.": "En plus de la recherche propre aux magasins, ARGUS trouve la page d'un produit via une recherche web « marque nom magasin » (les premiers résultats sur le domaine du magasin) et via des comparateurs de prix, dont les liens sponsorisés mènent aussi aux magasins. Ce qu'ils renvoient n'est qu'une suggestion : la page du magasin est toujours récupérée et vérifiée (code-barres, numéro de modèle, titre) avant d'être liée, et les prix sont toujours lus chez le magasin.",
+"Finder": "Chercheur",
+"web search": "recherche web",
+"price comparison": "comparateur de prix",
+"{n} finders": "{n} chercheurs",
+"link found via a price-comparison site": "lien trouvé via un comparateur de prix",
+"link found via a web search": "lien trouvé via une recherche web",
+"Every finder must be an object with id, name, kind, domain and search.": "Chaque chercheur doit être un objet avec id, nom, type, domaine et recherche.",
+"Finder id {id}: use lowercase letters, digits and _, unique.": "Id de chercheur {id} : minuscules, chiffres et _, unique.",
+"Finder {id}: a name and a valid domain are needed.": "Chercheur {id} : un nom et un domaine valide sont nécessaires.",
+"Finder {id}: unknown kind (one of: {kinds}).": "Chercheur {id} : type inconnu (parmi : {kinds}).",
+"Finder {id}: the search URL must start with https://, be on the finder's domain and contain {query} or {ean}.": "Chercheur {id} : l'URL de recherche doit commencer par https://, être sur le domaine du chercheur et contenir {query} ou {ean}.",
+"At most {n} finders in one settings file.": "Au plus {n} chercheurs dans un fichier de paramètres."
 }

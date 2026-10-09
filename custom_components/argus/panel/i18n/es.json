@@ -1205,5 +1205,19 @@
 "Electronics": "Electrónica",
 "Books": "Libros",
 "Toys & games": "Juguetes y juegos",
-"Home, garden & DIY": "Hogar, jardín y bricolaje"
+"Home, garden & DIY": "Hogar, jardín y bricolaje",
+"Finders": "Buscadores",
+"Besides the shops' own search, ARGUS finds a product's page through a web search for “brand name shop” (the first results on the shop's domain) and through price-comparison sites, whose sponsored links lead to the shops too. Whatever they return is only a suggestion: the shop's own page is always fetched and checked (barcode, model number, title) before it is linked, and prices are always read from the shop.": "Además de la búsqueda propia de las tiendas, ARGUS encuentra la página de un producto mediante una búsqueda web de «marca nombre tienda» (los primeros resultados en el dominio de la tienda) y mediante comparadores de precios, cuyos enlaces patrocinados también llevan a las tiendas. Lo que devuelven es solo una sugerencia: la página de la tienda siempre se obtiene y se comprueba (código de barras, número de modelo, título) antes de enlazarla, y los precios siempre se leen en la tienda.",
+"Finder": "Buscador",
+"web search": "búsqueda web",
+"price comparison": "comparador de precios",
+"{n} finders": "{n} buscadores",
+"link found via a price-comparison site": "enlace encontrado mediante un comparador de precios",
+"link found via a web search": "enlace encontrado mediante una búsqueda web",
+"Every finder must be an object with id, name, kind, domain and search.": "Cada buscador debe ser un objeto con id, nombre, tipo, dominio y búsqueda.",
+"Finder id {id}: use lowercase letters, digits and _, unique.": "Id de buscador {id}: minúsculas, dígitos y _, único.",
+"Finder {id}: a name and a valid domain are needed.": "Buscador {id}: se necesitan un nombre y un dominio válido.",
+"Finder {id}: unknown kind (one of: {kinds}).": "Buscador {id}: tipo desconocido (uno de: {kinds}).",
+"Finder {id}: the search URL must start with https://, be on the finder's domain and contain {query} or {ean}.": "Buscador {id}: la URL de búsqueda debe empezar por https://, estar en el dominio del buscador y contener {query} o {ean}.",
+"At most {n} finders in one settings file.": "Como máximo {n} buscadores en un archivo de configuración."
 }

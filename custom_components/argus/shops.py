@@ -28,11 +28,16 @@ CONF_LEGAL = "legal"
 #   generic      any other shop (JSON-LD / meta data)
 READERS = ("marketplace", "retail", "generic")
 MAX_SHOPS = 60
+MAX_FINDERS = 12
+FINDER_KINDS = ("websearch", "aggregator")
+FINDER_PREFIX = "finder:"        # the key of a finder in the fetcher (cookies, pauses, trace)
 
 SEARCH: dict[str, str] = dict(DEFAULT_SEARCH)      # effective search template per shop
 PROFILE: dict[str, dict[str, Any]] = {}            # shop id -> its entry in the imported settings file
 ALIASES: list[tuple[str, str]] = []                 # (shop name as written elsewhere, shop id), longest first
 CATEGORY_OF: dict[str, tuple[str, ...]] = {}        # shop id -> categories it sells (empty = every category)
+FINDERS: dict[str, dict[str, Any]] = {}            # finder id -> {id, name, kind, domain, search}
+ENABLED_FINDERS: set[str] = set()
 STATE = {"profile": False, "legal": False}
 
 
@@ -118,11 +123,31 @@ def validate_settings(data: Any) -> dict[str, Any]:
         shop["aliases"] = [a for a in (x.strip().lower()[:40] for x in aliases) if len(a) >= 3][:20]
         seen.add(rid)
         shops.append(shop)
+    finders, fseen = [], set()
+    if data.get("finders") is not None and not isinstance(data["finders"], list):
+        raise LocalizedError("{field}: wrong type in the shop settings file.", field="finders")
+    for raw in data.get("finders") or []:
+        if not isinstance(raw, dict):
+            raise LocalizedError("Every finder must be an object with id, name, kind, domain and search.")
+        fid, name, domain = str(raw.get("id") or "").strip(), str(raw.get("name") or "").strip()[:40], _domain(raw.get("domain"))
+        if not re.fullmatch(r"[a-z][a-z0-9_]{1,39}", fid) or fid in fseen:
+            raise LocalizedError("Finder id {id}: use lowercase letters, digits and _, unique.", id=fid)
+        if not name or not re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", domain):
+            raise LocalizedError("Finder {id}: a name and a valid domain are needed.", id=fid)
+        if raw.get("kind") not in FINDER_KINDS:
+            raise LocalizedError("Finder {id}: unknown kind (one of: {kinds}).", id=fid, kinds=", ".join(FINDER_KINDS))
+        search = raw.get("search")
+        if not _https_on(search, domain) or not valid_search(search):
+            raise LocalizedError("Finder {id}: the search URL must start with https://, be on the finder's domain and contain {query} or {ean}.", id=fid)
+        fseen.add(fid)
+        finders.append({"id": fid, "name": name, "kind": raw["kind"], "domain": domain, "search": search})
+    if len(finders) > MAX_FINDERS:
+        raise LocalizedError("At most {n} finders in one settings file.", n=MAX_FINDERS)
     if not shops:
         raise LocalizedError("The shop settings file contains no shops.")
     if len(shops) > MAX_SHOPS:
         raise LocalizedError("At most {n} shops in one settings file.", n=MAX_SHOPS)
-    return {"format": SETTINGS_FORMAT, "version": SETTINGS_VERSION, "shops": shops}
+    return {"format": SETTINGS_FORMAT, "version": SETTINGS_VERSION, "shops": shops, **({"finders": finders} if finders else {})}
 
 
 def legal_ok(options: dict[str, Any]) -> bool:
@@ -162,6 +187,12 @@ def apply_shop_options(options: dict[str, Any]) -> None:
     PROFILE.clear()
     ALIASES.clear()
     CATEGORY_OF.clear()
+    FINDERS.clear()
+    for f in (profile or {}).get("finders", []):
+        FINDERS[f["id"]] = f
+    enabled = options.get("finders")
+    ENABLED_FINDERS.clear()
+    ENABLED_FINDERS.update(f for f in FINDERS if enabled is None or f in enabled)
     for shop in (profile or {}).get("shops", []):
         PROFILE[shop["id"]] = shop
         RETAILERS[shop["id"]] = (shop["name"], "EUR")
@@ -206,6 +237,8 @@ def export_settings(options: dict[str, Any]) -> dict[str, Any]:
             s["search"] = tpl
         shops.append(s)
     out["shops"] = shops
+    if profile.get("finders"):
+        out["finders"] = list(profile["finders"])
     out["custom_shops"] = [s for s in options.get("custom_shops", []) or []]
     return out
 
@@ -230,12 +263,29 @@ def shops_for_category(category: str | None, enabled: list[str] | None = None) -
     return [r for r in ids if not CATEGORY_OF.get(r) or category in CATEGORY_OF[r]]
 
 
+def finder_key(fid: str) -> str:
+    return FINDER_PREFIX + fid
+
+
+def active_finders(kind: str | None = None) -> list[dict[str, Any]]:
+    """The finders that are switched on (in the order of the settings file), optionally of one kind."""
+    return [f for f in FINDERS.values() if f["id"] in ENABLED_FINDERS and (kind is None or f["kind"] == kind)]
+
+
+def finder_address(finder: dict[str, Any], query: str) -> str:
+    return finder["search"].replace("{query}", quote_plus(query)).replace("{ean}", quote_plus(query))
+
+
 def domain_of(rid: str) -> str | None:
+    if rid.startswith(FINDER_PREFIX):
+        return (FINDERS.get(rid[len(FINDER_PREFIX):]) or {}).get("domain")
     return (PROFILE.get(rid) or {}).get("domain") or GENERIC_SHOPS.get(rid, {}).get("domain")
 
 
 def home_of(rid: str) -> str | None:
     """The page a visit to this shop starts on (as a visitor would): from the settings, else the shop's root."""
+    if rid.startswith(FINDER_PREFIX):
+        return None
     home = (PROFILE.get(rid) or {}).get("home")
     if home:
         return home

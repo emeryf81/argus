@@ -28,14 +28,21 @@ through [HACS](https://hacs.xyz/)) and runs entirely on your own installation.
 
 ### Discovery methods
 
-| Method | What it does |
-| --- | --- |
-| Barcode search | searches each shop of the product's category for the EAN/ISBN |
-| Name search | searches by brand + name + model, ranks the hits by title similarity |
-| Page verification | opens the best candidate and checks barcode, model number, title and accessory words |
-| Barcode learning | a barcode confirmed by two shops is stored on the product |
-| Browser search (userscript) | your own browser searches shops that block the server or render results with JavaScript |
-| Manual | paste a link per shop in the product window; a manual link or price always wins |
+Several methods are combined, cheapest and surest first. **Every candidate is fetched from the shop and verified** (barcode,
+model number, title, accessory words) before it is linked, and **prices are always read from the shop's own page** — a
+finder only ever gives a suggestion.
+
+| # | Method | What it does |
+| --- | --- | --- |
+| 1 | Shop search by barcode | `https://www.mediamarkt.be/nl/search.html?query=4548736132580`: the shop's own search for the EAN/ISBN; a redirect straight to the product page counts too |
+| 2 | Price-comparison sites (*aggregators*) | one search per product (barcode, else name) at Google Shopping, Bing Shopping, Kelkoo…: **all** links to your shops are harvested, sponsored ads included (their redirect addresses — `adurl=`, `url=`, Bing's base64 `u=` — are unpacked to the shop's address) |
+| 3 | Web search (*websearch*) | searches `Sony WH-1000XM5 fnac` at DuckDuckGo / Bing / Google and takes the first results on the shop's domain, e.g. `https://www.nl.fnac.be/Sony-WH1000XM5B-…/a16864769` |
+| 4 | Shop search by name | the shop's own search by brand + name + model, ranked by title similarity |
+| 5 | Browser search (userscript) | your own browser searches shops that block the server or render results with JavaScript |
+| 6 | Manual | paste a link per shop in the product window; a manual link or price always wins |
+
+Links to accessories (case, cable, spare part…), search pages, the shop's home page and other domains are dropped before
+anything is fetched. A barcode confirmed by two shops is stored on the product, which makes later searches surer.
 
 ## Features
 
@@ -70,18 +77,20 @@ ARGUS ships **without any list of shops** and contacts **no website** until you 
 the terms once. This is on purpose: which websites your Home Assistant contacts, and what that means legally, is your own
 decision and responsibility.
 
-- A ready-made **example** is in [`examples/argus-shops.example.json`](examples/argus-shops.example.json): 16 Belgian and
-  Dutch shops (Amazon, bol, Krëfel, Vanden Borre, MediaMarkt, Coolblue, Fnac, Standaard Boekhandel, Smyths Toys,
-  ToyChamp, Dreamland, Brico, Gamma, Hubo, IKEA) with their categories.
+- A ready-made **example** is in [`examples/argus-shops.example.json`](examples/argus-shops.example.json): 15 Belgian and
+  Dutch shops (Amazon, bol, Krëfel, Vanden Borre, MediaMarkt, Coolblue, Fnac, Standaard Boekhandel, ToyChamp, Dreamland, Brico, Gamma, Hubo, IKEA) with their categories.
 - Format `argus-shop-settings`, version 1: per shop an id, name, domain, `reader` (`marketplace` / `retail` / `generic`),
-  `categories` and a `search` template containing `{query}` and/or `{ean}`.
+  `categories` and a `search` template containing `{query}` and/or `{ean}`; optionally `finders` (`kind`: `websearch` or
+  `aggregator`, with `domain` and `search`). Finders are websites too: they fall under the same terms and can be switched
+  off in *Manage → Settings → Finders*.
 - In the panel: *Manage → Shops & jobs → Import shop settings*, read the terms, tick the box.
   You can withdraw at any time under *Manage → Legal*; from then on no shop is contacted.
 - The search URL of every shop can be changed in *Manage → Settings*: search the shop for the word `ARGUSTEST`, paste the
   address and ARGUS turns it into a template.
 
-> ⚠️ **The example search URLs are best guesses and have not been verified against the live sites**, and shops change
-> their pages. Use *Manage → Parser lab* to test a shop and adjust the search URL where needed. Some shops block servers or
+> ⚠️ **The example search URLs (shops and finders) are best guesses and have not been verified against the live sites**, and shops change
+> their pages. Use *Manage → Parser lab* to test a shop and adjust the search URL where needed. Search engines such as Google block
+> servers quickly; ARGUS pauses a finder after a block and uses the others. Some shops block servers or
 > render results with JavaScript; the userscript and manual links are the fallback.
 
 ## Politeness towards the shops

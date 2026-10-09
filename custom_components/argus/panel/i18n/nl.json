@@ -1205,5 +1205,19 @@
 "Electronics": "Elektronica",
 "Books": "Boeken",
 "Toys & games": "Speelgoed & games",
-"Home, garden & DIY": "Huis, tuin & doe-het-zelf"
+"Home, garden & DIY": "Huis, tuin & doe-het-zelf",
+"Finders": "Zoekers",
+"Besides the shops' own search, ARGUS finds a product's page through a web search for “brand name shop” (the first results on the shop's domain) and through price-comparison sites, whose sponsored links lead to the shops too. Whatever they return is only a suggestion: the shop's own page is always fetched and checked (barcode, model number, title) before it is linked, and prices are always read from the shop.": "Naast de eigen zoekfunctie van de winkels vindt ARGUS de pagina van een product via een websearch naar “merk naam winkel” (de eerste resultaten op het domein van de winkel) en via prijsvergelijkers, waarvan de gesponsorde links ook naar de winkels leiden. Wat ze teruggeven is slechts een suggestie: de eigen pagina van de winkel wordt altijd opgehaald en gecontroleerd (barcode, modelnummer, titel) voordat ze gekoppeld wordt, en prijzen worden altijd bij de winkel zelf gelezen.",
+"Finder": "Zoeker",
+"web search": "websearch",
+"price comparison": "prijsvergelijker",
+"{n} finders": "{n} zoekers",
+"link found via a price-comparison site": "link gevonden via een prijsvergelijker",
+"link found via a web search": "link gevonden via een websearch",
+"Every finder must be an object with id, name, kind, domain and search.": "Elke zoeker moet een object zijn met id, naam, soort, domein en zoekadres.",
+"Finder id {id}: use lowercase letters, digits and _, unique.": "Zoeker-id {id}: gebruik kleine letters, cijfers en _, uniek.",
+"Finder {id}: a name and a valid domain are needed.": "Zoeker {id}: een naam en een geldig domein zijn nodig.",
+"Finder {id}: unknown kind (one of: {kinds}).": "Zoeker {id}: onbekend soort (een van: {kinds}).",
+"Finder {id}: the search URL must start with https://, be on the finder's domain and contain {query} or {ean}.": "Zoeker {id}: het zoekadres moet beginnen met https://, op het domein van de zoeker staan en {query} of {ean} bevatten.",
+"At most {n} finders in one settings file.": "Maximaal {n} zoekers in één instellingenbestand."
 }

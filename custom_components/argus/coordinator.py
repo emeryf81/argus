@@ -666,7 +666,8 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if url and url_key(rid, url) not in rejected:
                 self._set_discovered(self.store["offers"].setdefault(pid, {}), rid, url, how)
                 found += 1
-                self.log("ok", "discover", T("link found by barcode") if how == "ean" else T("link found by name"),
+                self.log("ok", "discover", {"ean": T("link found by barcode"), "agg": T("link found via a price-comparison site"),
+                                            "web": T("link found via a web search")}.get(how or "", T("link found by name")),
                          product=pid, retailer=rid, url=url)
             elif url:
                 self.log("info", "discover", T("found a link you rejected earlier; not linked again"), product=pid, retailer=rid, url=url)
@@ -1197,7 +1198,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def settings_get(self) -> dict[str, Any]:
         """Return panel settings and shop state."""
-        from .shops import CATEGORY_OF
+        from .shops import CATEGORY_OF, ENABLED_FINDERS, FINDERS, finder_key
 
         o = {**self.entry.data, **self.entry.options}
         shops = []
@@ -1218,6 +1219,8 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "digest_time": str(o.get(CONF_DIGEST_TIME, DEFAULT_DIGEST_TIME))[:5], "use_impersonation": bool(o.get(CONF_IMPERSONATE, True)),
             "notify_service": o.get(CONF_NOTIFY, "") or "",
             "shops": shops, "transport": self.fetcher.transport,
+            "finders": [{**f, "enabled": f["id"] in ENABLED_FINDERS, "paused_hours": round(self.fetcher.cooldown_left(finder_key(f["id"])) / 3600, 2)}
+                        for f in FINDERS.values()],
             "refresh_mode": self.refresh_mode, "spread_hours": self.spread_hours, "watch_cycle_min": self.watch_cycle_minutes,
             "deal_min_score": self.deal_rules["min_score"], "deal_atl": self.deal_rules["atl"], "deal_target": self.deal_rules["target"],
             "cycle_choices": list(CYCLE_CHOICES), "watch_cycle_choices": list(WATCH_CYCLE_CHOICES), "product_limit": self.product_limit,
@@ -1360,6 +1363,9 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             active = list(opts.get(CONF_RETAILERS, self.opt(self.entry, CONF_RETAILERS, profile_ids())))
             opts[CONF_RETAILERS] = [r for r in active if r in valid_ids] + \
                 [s["id"] for s in opts[CONF_CUSTOM_SHOPS] if s["id"] not in before and s["id"] not in active]
+        if "finders" in fields:
+            from .shops import FINDERS
+            opts["finders"] = [f for f in fields["finders"] if f in FINDERS]
         if "no_autopause" in fields:
             opts[CONF_NO_AUTOPAUSE] = [r for r in fields["no_autopause"] if r in valid_ids]
         return opts

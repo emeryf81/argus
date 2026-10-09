@@ -1205,5 +1205,19 @@
 "Electronics": "电子产品",
 "Books": "图书",
 "Toys & games": "玩具与游戏",
-"Home, garden & DIY": "家居、园艺与 DIY"
+"Home, garden & DIY": "家居、园艺与 DIY",
+"Finders": "查找器",
+"Besides the shops' own search, ARGUS finds a product's page through a web search for “brand name shop” (the first results on the shop's domain) and through price-comparison sites, whose sponsored links lead to the shops too. Whatever they return is only a suggestion: the shop's own page is always fetched and checked (barcode, model number, title) before it is linked, and prices are always read from the shop.": "除了商店自身的搜索，ARGUS 还会通过“品牌 名称 商店”的网页搜索（商店域名上的前几个结果）以及比价网站（其赞助链接同样指向商店）来找到产品页面。它们返回的只是建议：在关联之前，始终会获取并核对商店自己的页面（条码、型号、标题），价格也始终从商店读取。",
+"Finder": "查找器",
+"web search": "网页搜索",
+"price comparison": "比价网站",
+"{n} finders": "{n} 个查找器",
+"link found via a price-comparison site": "通过比价网站找到链接",
+"link found via a web search": "通过网页搜索找到链接",
+"Every finder must be an object with id, name, kind, domain and search.": "每个查找器必须是包含 id、名称、类型、域名和搜索地址的对象。",
+"Finder id {id}: use lowercase letters, digits and _, unique.": "查找器 id {id}：使用小写字母、数字和 _，且唯一。",
+"Finder {id}: a name and a valid domain are needed.": "查找器 {id}：需要名称和有效域名。",
+"Finder {id}: unknown kind (one of: {kinds}).": "查找器 {id}：未知类型（可选：{kinds}）。",
+"Finder {id}: the search URL must start with https://, be on the finder's domain and contain {query} or {ean}.": "查找器 {id}：搜索网址必须以 https:// 开头、位于该查找器的域名上并包含 {query} 或 {ean}。",
+"At most {n} finders in one settings file.": "一个设置文件中最多 {n} 个查找器。"
 }

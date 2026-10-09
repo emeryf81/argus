@@ -1205,5 +1205,19 @@
 "Electronics": "Elektronik",
 "Books": "Buku",
 "Toys & games": "Mainan & game",
-"Home, garden & DIY": "Rumah, taman & DIY"
+"Home, garden & DIY": "Rumah, taman & DIY",
+"Finders": "Pencari",
+"Besides the shops' own search, ARGUS finds a product's page through a web search for “brand name shop” (the first results on the shop's domain) and through price-comparison sites, whose sponsored links lead to the shops too. Whatever they return is only a suggestion: the shop's own page is always fetched and checked (barcode, model number, title) before it is linked, and prices are always read from the shop.": "Selain pencarian bawaan toko, ARGUS menemukan halaman produk lewat pencarian web “merek nama toko” (hasil pertama di domain toko) dan lewat situs perbandingan harga, yang tautan bersponsornya juga mengarah ke toko. Yang mereka kembalikan hanyalah saran: halaman toko itu sendiri selalu diambil dan diperiksa (barcode, nomor model, judul) sebelum ditautkan, dan harga selalu dibaca dari toko.",
+"Finder": "Pencari",
+"web search": "pencarian web",
+"price comparison": "perbandingan harga",
+"{n} finders": "{n} pencari",
+"link found via a price-comparison site": "tautan ditemukan lewat situs perbandingan harga",
+"link found via a web search": "tautan ditemukan lewat pencarian web",
+"Every finder must be an object with id, name, kind, domain and search.": "Setiap pencari harus berupa objek dengan id, nama, jenis, domain, dan pencarian.",
+"Finder id {id}: use lowercase letters, digits and _, unique.": "Id pencari {id}: gunakan huruf kecil, angka, dan _, unik.",
+"Finder {id}: a name and a valid domain are needed.": "Pencari {id}: nama dan domain yang valid diperlukan.",
+"Finder {id}: unknown kind (one of: {kinds}).": "Pencari {id}: jenis tidak dikenal (salah satu dari: {kinds}).",
+"Finder {id}: the search URL must start with https://, be on the finder's domain and contain {query} or {ean}.": "Pencari {id}: URL pencarian harus diawali https://, berada di domain pencari, dan memuat {query} atau {ean}.",
+"At most {n} finders in one settings file.": "Maksimal {n} pencari dalam satu berkas pengaturan."
 }

@@ -1945,6 +1945,10 @@ class ArgusPanel extends HTMLElement {
         <label style="grid-column:span 2">${t("Search URL")}<input id="n_search" placeholder="https://www.example-shop.be/search?q=ARGUSTEST"><div class="hint muted" id="n_search_prev"></div></label>
         <div style="grid-column:1/-1"><div class="muted" style="font-size:13px;margin-bottom:4px">${t("Which categories does it sell?")}</div><div class="chips">${Object.entries(cats).map(([k, v]) => `<label class="chk"><input type="checkbox" class="n_cat" value="${esc(k)}" checked> ${CATEGORY_ICONS[k] || ""} ${esc(t(v))}</label>`).join(" ")}</div></div></div>
         <p style="font-size:12px">${t("Prices are read from the standard product data (JSON-LD/meta) that most web shops have.")}</p><button class="btn ghost" id="n_add">＋ ${t("Add to the list")}</button></div>
+      ${(st.finders || []).length ? `<div class="panel"><h3>🧭 ${t("Finders")}</h3>
+        <p>${t("Besides the shops' own search, ARGUS finds a product's page through a web search for “brand name shop” (the first results on the shop's domain) and through price-comparison sites, whose sponsored links lead to the shops too. Whatever they return is only a suggestion: the shop's own page is always fetched and checked (barcode, model number, title) before it is linked, and prices are always read from the shop.")}</p>
+        <div class="tscroll"><table class="tbl"><tr><th>${t("Finder")}</th><th>${t("Kind")}</th><th>${t("Status")}</th></tr>${(st.finders || []).map((x) => `<tr><td><label class="chk" style="display:flex;gap:8px;align-items:center"><input type="checkbox" class="f_on" value="${esc(x.id)}" ${x.enabled ? "checked" : ""}> <b>${esc(x.name)}</b></label><div class="muted" style="font-size:12px">${esc(x.domain)}</div></td>
+          <td>${x.kind === "websearch" ? t("web search") : t("price comparison")}</td><td>${x.paused_hours > 0 ? `<span class="lk suspect">${t("paused {time}", { time: dur(x.paused_hours * 3600) })}</span>` : `<span class="lk ok">${t("active")}</span>`}</td></tr>`).join("")}</table></div></div>` : ""}
       <div class="panel"><h3>🚫 ${t("Product filter")}</h3>
         <p>${t("A page whose title contains one of these words is never taken as the same product (e.g. a case or a spare part for your product): it is skipped in shop searches and the link check. Words that are in your product's own name are always allowed.")}</p>
         <details style="margin:0 0 10px"><summary class="muted" style="cursor:pointer">${t("Built-in words ({n})", { n: (st.builtin_words || []).length })}</summary>
@@ -2118,7 +2122,7 @@ class ArgusPanel extends HTMLElement {
           const j = JSON.parse(await f.text());
           if (!j || !["argus-shop-settings"].includes(j.format) || !Array.isArray(j.shops)) throw new Error("format");
           payload = j; q("ss_name").textContent = f.name;
-          q("ss_info").innerHTML = `<p><b>${t("{n} shops", { n: j.shops.length })}:</b> ${j.shops.map((x) => esc(x.name || x.id)).join(", ")}</p>`;
+          q("ss_info").innerHTML = `<p><b>${t("{n} shops", { n: j.shops.length })}:</b> ${j.shops.map((x) => esc(x.name || x.id)).join(", ")}${(j.finders || []).length ? `<br><b>${t("{n} finders", { n: j.finders.length })}:</b> ${j.finders.map((x) => esc(x.name || x.id)).join(", ")}` : ""}</p>`;
         } catch (e) { payload = null; q("ss_info").innerHTML = ""; this.toast(t("This is not a shop settings file for this integration."), "err"); }
         sync();
       };
@@ -2233,6 +2237,7 @@ class ArgusPanel extends HTMLElement {
       // a number field some phone keyboards leave empty: keep the saved number instead of 0
       const tkn = (k) => { const v = parseInt(String($("o_tkn_" + k).value).replace(/\D/g, ""), 10); return Number.isFinite(v) ? Math.max(0, Math.min(50, v)) : ((st.ticker || {})["max_" + k] ?? 3); };
       f.ticker = { ...Object.fromEntries(["drops", "deals", "news"].flatMap((k) => [[k, $("o_tk_" + k).checked], ["max_" + k, tkn(k)]])), shuffle: $("o_tk_shuffle").checked };
+      if (st.finders && st.finders.length) f.finders = [...root.querySelectorAll(".f_on")].filter((c) => c.checked).map((c) => c.value);
       f.browser_relay = $("o_relay").checked; f.relay_hours = +$("o_relayh").value || 6;
       f.block_words = lines($("o_block").value); f.allow_words = lines($("o_allow").value);
       if (!f.retailers.length) return this.toast(t("Switch on at least one shop"), "err");

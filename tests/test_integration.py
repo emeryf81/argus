@@ -443,3 +443,51 @@ async def test_history_is_capped(hass: HomeAssistant, entry, world):
     o = {"history": [[float(i), 1.0 + i] for i in range(MAX_HISTORY)]}
     record_price(o, 5.5, now=float(MAX_HISTORY + 10) * 86400)
     assert len(o["history"]) == MAX_HISTORY and o["history"][-1][1] == 5.5
+
+
+async def test_discovery_via_web_search_and_price_comparison_sites(hass: HomeAssistant, entry, world):
+    """Shops whose own search finds nothing are found through a web search (first result on the shop's domain) and through
+    the sponsored/organic links of comparison sites, whose redirect addresses are unpacked; every candidate is verified."""
+    fnac = "https://www.nl.fnac.be/Sony-WH1000XM5B-Draadloze-ruiswerende-Bluetooth-Hoofdtelefoon-Zwart/a16864769"
+    world.pages.update({
+        # a web search: a sponsored result, an accessory and the shop's page
+        "html.duckduckgo.com/html/": (200, "<html><body>"
+            '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.sony.be%2Fnl%2Fp%2F1">Sony officieel</a>'
+            '<a class="result__a" href="//duckduckgo.com/l/?uddg=' + fnac.replace(":", "%3A").replace("/", "%2F").replace("a16864769", "x1") + '">Hoes voor Sony WH-1000XM5 bij Fnac</a>'
+            f'<a class="result__a" href="//duckduckgo.com/l/?uddg={fnac.replace(":", "%3A").replace("/", "%2F")}">Sony WH-1000XM5 draadloze koptelefoon - Fnac</a>'
+            "</body></html>"),
+        "fnac.be/Sony-WH1000XM5B": (200, page("Sony WH1000XM5B Draadloze ruiswerende Bluetooth Hoofdtelefoon Zwart", 289.0, EAN)),
+        # a comparison site: its ad for Vanden Borre hides the shop's address in a redirect parameter
+        "kelkoo.be/search": (200, "<html><body>"
+            '<a href="https://www.kelkoo.be/go?url=https%3A%2F%2Fwww.vandenborre.be%2Fnl%2Fp%2Fsony-wh-1000xm5%2F77%2F%3Futm_source%3Dkelkoo">Sony WH-1000XM5 - Vanden Borre</a>'
+            '<a href="https://www.kelkoo.be/go?url=https%3A%2F%2Fwww.vandenborre.be%2Fnl%2Fp%2Fhoesje-sony-wh-1000xm5%2F78%2F">Hoesje Sony WH-1000XM5</a>'
+            "</body></html>"),
+        "vandenborre.be/nl/p/sony-wh-1000xm5/77/": (200, page("Sony WH-1000XM5 draadloze koptelefoon", 315.0, EAN)),
+    })
+    world.pages.pop("vandenborre.be/nl/search?q=" + EAN)
+    world.pages.pop("vandenborre.be/nl/search?q=Sony")           # the shop's own search finds nothing
+    coord = await setup(hass, entry)
+    pid = (await coord.add_product("https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/", discover=False))["id"]
+    res = await coord.discover_product(pid)
+    offers = coord.store["offers"][pid]
+    assert res["found"] == 3 and set(offers) == {"bol", "krefel", "vandenborre", "fnac_be"} - set() or "fnac_be" in offers
+    assert offers["fnac_be"]["found_via"] == "web" and offers["fnac_be"]["url"] == fnac
+    assert offers["vandenborre"]["found_via"] == "agg"
+    assert offers["vandenborre"]["url"] == "https://www.vandenborre.be/nl/p/sony-wh-1000xm5/77/"      # tracking parameter gone
+    assert not [h for h in world.hits if "hoesje" in h or "sony.be" in h or "x1" in h]                    # accessories / other domains never fetched
+    assert len([h for h in world.hits if "kelkoo.be/search" in h]) == 1                                   # one comparison search serves all shops
+
+
+def test_extract_unpacks_redirects_and_ignores_search_pages_and_accessories():
+    from custom_components.argus.finders import extract
+
+    page_ = ('<a href="/url?q=https://www.mediamarkt.be/nl/product/_sony-wh-1000xm5-123.html&sa=U">Sony WH-1000XM5 | MediaMarkt</a>'
+             '<a href="https://www.googleadservices.com/pagead/aclk?adurl=https%3A%2F%2Fwww.krefel.be%2Fnl%2Fp%2Fsony-wh-1000xm5%2F5">Sony WH-1000XM5 Krëfel</a>'
+             '<a href="https://www.mediamarkt.be/nl/search.html?query=sony">zoeken</a>'
+             '<a href="https://www.krefel.be/nl/p/hoes-sony-wh-1000xm5/6">Hoes</a>'
+             '<script>var u = "https:\\/\\/www.bol.com\\/be\\/nl\\/p\\/sony-wh-1000xm5\\/9300001\\/";</script>')
+    got = extract(page_, {"mediamarkt_be": "mediamarkt.be", "krefel": "krefel.be", "bol": "bol.com"},
+                  {"name": "Sony WH-1000XM5", "brand": "Sony"})
+    assert [c["url"] for c in got["mediamarkt_be"]] == ["https://www.mediamarkt.be/nl/product/_sony-wh-1000xm5-123.html"]
+    assert [c["url"] for c in got["krefel"]] == ["https://www.krefel.be/nl/p/sony-wh-1000xm5/5"]
+    assert [c["url"] for c in got["bol"]] == ["https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/"]
