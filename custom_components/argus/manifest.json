@@ -1,0 +1,13 @@
+{
+  "domain": "argus",
+  "name": "ARGUS",
+  "codeowners": ["@emeryf81"],
+  "config_flow": true,
+  "dependencies": ["http", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/emeryf81/argus",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/emeryf81/argus/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

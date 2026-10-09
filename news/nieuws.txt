@@ -1,0 +1,17 @@
+id: 2026-10-09-argus
+date: 2026-10-09
+lang: nl
+title: Welkom bij ARGUS
+link: /argus
+
+ARGUS houdt de prijs van je producten in de gaten bij meerdere webshops tegelijk.
+Plak het adres van een product en ARGUS zoekt het bij de andere webshops van die categorie.
+---
+id: 2026-10-09-argus-en
+date: 2026-10-09
+lang: en
+title: Welcome to ARGUS
+link: /argus
+
+ARGUS watches the price of your products at several web shops at once.
+Paste the address of a product and ARGUS looks it up at the other shops of its category.

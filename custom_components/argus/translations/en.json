@@ -1,0 +1,359 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ARGUS",
+        "description": "Most settings are also in the panel: Manage → Settings.",
+        "data": {
+          "discount_threshold": "Discount threshold",
+          "retailers": "Shops",
+          "language": "Language",
+          "refresh_mode": "Price checks",
+          "spread_hours": "Cycle",
+          "watch_cycle_min": "Priority cycle",
+          "refresh_times": "Fixed times",
+          "digest_time": "Daily digest",
+          "min_history_days": "History for 'lowest so far'",
+          "use_impersonation": "Imitate Chrome",
+          "notify_service": "Notify service"
+        },
+        "data_description": {
+          "discount_threshold": "From this discount a price counts as a good price.",
+          "retailers": "The shops that are checked.",
+          "language": "Panel, notifications and userscript.",
+          "refresh_mode": "Spread: every product once per cycle, gentle on the shops.",
+          "spread_hours": "Every product once every … hours.",
+          "watch_cycle_min": "Products with a high priority (★★ and ★★★) can be checked more often.",
+          "refresh_times": "E.g. 07:30, 19:30.",
+          "digest_time": "Time of the daily summary.",
+          "min_history_days": "Days of prices before 'lowest so far' counts.",
+          "use_impersonation": "curl_cffi: far fewer blocks.",
+          "notify_service": "Optional; the Notifications tab in the panel is better."
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Already configured"
+    },
+    "error": {
+      "invalid_times": "Enter 1 to 6 times as HH:MM, separated by commas"
+    }
+  },
+  "selector": {
+    "refresh_mode": {
+      "options": {
+        "spread": "Spread over the day",
+        "times": "At fixed times",
+        "off": "Off"
+      }
+    },
+    "cycle": {
+      "options": {
+        "2": "2 h",
+        "3": "3 h",
+        "4": "4 h",
+        "6": "6 h",
+        "12": "12 h",
+        "24": "24 h"
+      }
+    },
+    "watch_cycle": {
+      "options": {
+        "0": "Like the other products",
+        "30": "30 min",
+        "60": "1 h",
+        "120": "2 h",
+        "180": "3 h",
+        "240": "4 h",
+        "360": "6 h",
+        "720": "12 h",
+        "1440": "24 h"
+      }
+    },
+    "category": {
+      "options": {
+        "electronics": "Electronics",
+        "books": "Books",
+        "toys_games": "Toys & games",
+        "home_garden_diy": "Home, garden & DIY",
+        "other": "Other"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "tracked_products": {
+        "name": "Tracked products"
+      },
+      "all_time_lows": {
+        "name": "Products at lowest price so far"
+      },
+      "price_drops": {
+        "name": "Products with a price drop"
+      },
+      "targets_reached": {
+        "name": "Products at target price"
+      },
+      "basket_cost": {
+        "name": "Cost of everything (best prices)"
+      },
+      "basket_saving": {
+        "name": "Saving against reference prices"
+      },
+      "offers_with_errors": {
+        "name": "Offers with errors"
+      },
+      "best_deal": {
+        "name": "Best deal score"
+      }
+    }
+  },
+  "services": {
+    "add_product": {
+      "name": "Add product",
+      "description": "Add a product by the address of a product page (or by name/barcode); ARGUS looks it up at the other shops of its category.",
+      "fields": {
+        "url": {
+          "name": "Address",
+          "description": "Address of a product page at one of your shops."
+        },
+        "name": {
+          "name": "Name",
+          "description": "Name of the product."
+        },
+        "ean": {
+          "name": "Barcode",
+          "description": "EAN or ISBN."
+        },
+        "brand": {
+          "name": "Brand",
+          "description": "Brand."
+        },
+        "model": {
+          "name": "Model",
+          "description": "Model or part number."
+        },
+        "category": {
+          "name": "Category",
+          "description": "Category; decides which shops are searched."
+        },
+        "reference_price": {
+          "name": "Reference price",
+          "description": "Usual or list price."
+        },
+        "target_price": {
+          "name": "Target price",
+          "description": "You get a message below this price."
+        },
+        "priority": {
+          "name": "Priority",
+          "description": "1 to 3 stars."
+        },
+        "notes": {
+          "name": "Notes",
+          "description": "Your notes."
+        }
+      }
+    },
+    "remove_product": {
+      "name": "Remove product",
+      "description": "Stop tracking a product.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product id."
+        }
+      }
+    },
+    "find_shops": {
+      "name": "Find the product at other shops",
+      "description": "Look a product (or every product) up at the other shops of its category.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product id; empty = every product (a background job)."
+        },
+        "force": {
+          "name": "Force",
+          "description": "Also try paused shops."
+        }
+      }
+    },
+    "refresh": {
+      "name": "Refresh prices",
+      "description": "Fetch the prices of one product now, or start a full round.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product id; empty = every product (a background job)."
+        },
+        "force": {
+          "name": "Force",
+          "description": "Also try paused shops."
+        }
+      }
+    },
+    "verify_links": {
+      "name": "Check links",
+      "description": "Judge every shop link again (barcode, title, price)."
+    },
+    "confirm_offer": {
+      "name": "Approve link",
+      "description": "This link is the right product.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product id."
+        },
+        "retailer": {
+          "name": "Shop",
+          "description": "Shop id."
+        }
+      }
+    },
+    "remove_offer": {
+      "name": "Remove link",
+      "description": "Remove a shop link (and block it).",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product id."
+        },
+        "retailer": {
+          "name": "Shop",
+          "description": "Shop id."
+        },
+        "block": {
+          "name": "Block",
+          "description": "Never link this page again."
+        }
+      }
+    },
+    "set_offer": {
+      "name": "Set link",
+      "description": "Set the link of a product at a shop by hand.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product id."
+        },
+        "retailer": {
+          "name": "Shop",
+          "description": "Shop id."
+        },
+        "url": {
+          "name": "Address",
+          "description": "Address of the product page."
+        }
+      }
+    },
+    "fix_offer": {
+      "name": "Correct link or price",
+      "description": "Correct the link and/or the price of a shop by hand.",
+      "fields": {
+        "product": {
+          "name": "Product",
+          "description": "Product id."
+        },
+        "retailer": {
+          "name": "Shop",
+          "description": "Shop id."
+        },
+        "url": {
+          "name": "Address",
+          "description": "Address of the product page."
+        },
+        "price": {
+          "name": "Price",
+          "description": "Price that wins over the automatic one."
+        }
+      }
+    },
+    "cancel_job": {
+      "name": "Stop job",
+      "description": "Stop the running background job."
+    },
+    "export_products": {
+      "name": "Export products",
+      "description": "Your products as CSV."
+    },
+    "export_data": {
+      "name": "Export backup",
+      "description": "Everything as a backup (JSON)."
+    },
+    "import_data": {
+      "name": "Import backup",
+      "description": "Restore a backup.",
+      "fields": {
+        "data": {
+          "name": "Data",
+          "description": "The backup."
+        },
+        "file_path": {
+          "name": "File",
+          "description": "Path of a backup file."
+        },
+        "merge": {
+          "name": "Merge",
+          "description": "Add to what you have instead of replacing it."
+        }
+      }
+    },
+    "import_products": {
+      "name": "Import products",
+      "description": "Add the products of a CSV file one after the other.",
+      "fields": {
+        "csv_text": {
+          "name": "CSV text",
+          "description": "The CSV."
+        },
+        "file_path": {
+          "name": "File",
+          "description": "Path of a CSV file."
+        },
+        "discover": {
+          "name": "Find at other shops",
+          "description": "Look every product up at the other shops."
+        }
+      }
+    },
+    "report_price": {
+      "name": "Report price",
+      "description": "A price seen elsewhere (userscript, automation).",
+      "fields": {
+        "price": {
+          "name": "Price",
+          "description": "Price in euro."
+        },
+        "url": {
+          "name": "Address",
+          "description": "Address of the product page."
+        },
+        "product": {
+          "name": "Product",
+          "description": "Product id."
+        },
+        "retailer": {
+          "name": "Shop",
+          "description": "Shop id."
+        },
+        "title": {
+          "name": "Title",
+          "description": "Title of the page."
+        },
+        "via": {
+          "name": "Via",
+          "description": "Where the price came from."
+        },
+        "gtins": {
+          "name": "Barcodes",
+          "description": "Barcodes (EAN/ISBN) the page declares."
+        }
+      }
+    },
+    "send_digest": {
+      "name": "Send digest",
+      "description": "Send the daily summary now."
+    }
+  }
+}
