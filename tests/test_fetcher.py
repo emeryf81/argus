@@ -1,0 +1,236 @@
+"""Fetcher against a local server: block cooldown, transports, and finding a product at another shop."""
+import asyncio
+import json
+import time
+from unittest.mock import AsyncMock
+
+import pytest
+
+pytestmark = pytest.mark.allow_hosts(["127.0.0.1"])
+from aiohttp import web
+from custom_components.argus.client import Fetcher
+
+PAGE_OK = '<script type="application/ld+json">{"@type":"Product","name":"x","offers":{"price":"12.34"}}</script>'
+
+
+def product_page(name, price, gtin=None):
+    node = {"@type": "Product", "name": name, "offers": {"price": price, "availability": "https://schema.org/InStock"}}
+    if gtin:
+        node["gtin13"] = gtin
+    return f'<html><head><script type="application/ld+json">{json.dumps(node)}</script></head></html>'
+
+
+@pytest.fixture
+async def server(aiohttp_server):
+    state = {"status": 200, "body": PAGE_OK, "hits": 0, "ua": None}
+
+    async def handler(request):
+        state["hits"] += 1
+        state["ua"] = request.headers.get("User-Agent")
+        return web.Response(status=state["status"], text=state["body"], content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/{tail:.*}", handler)
+    srv = await aiohttp_server(app)
+    state["url"] = str(srv.make_url("/p"))
+    return state
+
+
+def quick(hass, impersonate=False):
+    f = Fetcher(hass, impersonate)
+    f.min_delay = 0
+    f.domain_gap = f.search_gap = 0
+    return f
+
+
+@pytest.mark.parametrize("impersonate", [True, False])
+async def test_fetch_and_cooldown(hass, server, impersonate):
+    f = quick(hass, impersonate)
+    await f.async_setup()
+    assert f.transport.startswith("curl_cffi") == impersonate
+    parsed, err = await f.fetch_offer("bol", server["url"])
+    assert err is None and parsed.price == 12.34
+
+    server["status"] = 403
+    parsed, err = await f.fetch_offer("bol", server["url"])
+    assert parsed is None and "blocked (HTTP 403)" in err
+    hits_after_block = server["hits"]
+    parsed, err = await f.fetch_offer("bol", server["url"])      # cooling down: no request sent
+    assert "paused" in err and server["hits"] == hits_after_block
+    assert f.cooldown_left("bol") > 3000
+    f.blocked_until["bol"] = time.time() - 1                     # cooldown over
+    server["status"] = 200
+    parsed, err = await f.fetch_offer("bol", server["url"])
+    assert parsed.price == 12.34 and f.blocks["bol"] == 0
+    await f.async_close()
+
+
+async def test_captcha_page_counts_as_block(hass, server):
+    f = quick(hass)
+    server["body"] = "<html>Type the characters you see in this image</html>"
+    parsed, err = await f.fetch_offer("amazon_nl", server["url"])
+    assert "captcha" in err and f.cooldown_left("amazon_nl") > 0
+    await f.async_close()
+
+
+@pytest.mark.parametrize("impersonate", [True, False])
+async def test_redirects_stay_on_the_same_site(hass, aiohttp_server, impersonate):
+    async def handler(request):
+        if request.path == "/same":
+            raise web.HTTPFound("/p")
+        if request.path == "/away":
+            raise web.HTTPFound(f"http://localhost:{request.url.port}/p")    # another host: never followed
+        return web.Response(text=PAGE_OK, content_type="text/html")
+
+    app = web.Application()
+    app.router.add_get("/{tail:.*}", handler)
+    srv = await aiohttp_server(app)
+    f = quick(hass, impersonate)
+    await f.async_setup()
+    parsed, err = await f.fetch_offer("bol", str(srv.make_url("/same")))
+    assert err is None and parsed.price == 12.34 and f.final_url["bol"].endswith("/p")
+    parsed, err = await f.fetch_offer("bol", str(srv.make_url("/away")))
+    assert parsed is None and "another site blocked" in err
+    await f.async_close()
+
+
+@pytest.mark.parametrize("impersonate", [True, False])
+async def test_oversized_pages_are_refused(hass, aiohttp_server, impersonate, monkeypatch):
+    from custom_components.argus import client
+
+    monkeypatch.setattr(client, "MAX_BODY", 5000)
+
+    async def handler(request):
+        if request.path in ("/big", "/endless"):        # no Content-Length: only the streamed count can stop it
+            resp = web.StreamResponse()
+            await resp.prepare(request)
+            for _ in range(20 if request.path == "/big" else 400):
+                await resp.write(b"x" * 1000)
+                await asyncio.sleep(0.01)                   # in portions: read(n) may return before the end
+            await resp.write_eof()
+            return resp
+        return web.Response(text=PAGE_OK, content_type="text/html", charset="utf-8")
+
+    app = web.Application()
+    app.router.add_get("/{tail:.*}", handler)
+    srv = await aiohttp_server(app)
+    f = quick(hass, impersonate)
+    await f.async_setup()
+    parsed, err = await f.fetch_offer("bol", str(srv.make_url("/big")))
+    assert parsed is None and "over" in err
+    t0 = time.time()                                       # the transfer itself stops: no waiting for 4 s of data
+    parsed, err = await f.fetch_offer("bol", str(srv.make_url("/endless")))
+    assert parsed is None and "over" in err and time.time() - t0 < 3
+    parsed, err = await f.fetch_offer("bol", str(srv.make_url("/p")))
+    assert err is None and parsed.price == 12.34
+    await f.async_close()
+
+
+def test_redirects_are_anchored_to_the_shops_own_domain():
+    """A shop's pages may only redirect within the shop's domain, not within a shared suffix like ne.jp."""
+    from custom_components.argus import client, shops
+    shops.apply_shop_options({"custom_shops": [{"name": "Foo JP", "domain": "foo.ne.jp", "search": ""}]})
+    try:
+        rid = shops.shop_id("Foo JP")
+        home = client.redirect_home(rid, "https://www.foo.ne.jp/p/1")
+        assert home == "foo.ne.jp"
+        client.check_url("https://shop.foo.ne.jp/x", home)
+        with pytest.raises(ValueError):
+            client.check_url("https://bar.ne.jp/x", home)
+        assert client.redirect_home("bol", "https://www.bol.com/nl/nl/p/1") == "bol.com"
+    finally:
+        shops.apply_shop_options({})
+
+
+SEARCH = """<html><body>
+<a href="/nl/p/sony-wh-1000xm5-zwart/123/" title="Sony WH-1000XM5 draadloze koptelefoon zwart">Sony WH-1000XM5</a>
+<a href="/nl/p/sony-wh-1000xm4-zwart/124/">Sony WH-1000XM4</a></body></html>"""
+PRODUCT = {"id": "pX", "name": "Sony WH-1000XM5 draadloze koptelefoon", "brand": "Sony", "ean": "4548736132580"}
+
+
+def scripted(f, pages):
+    """Answers by address: the search page first, then product pages."""
+    async def get(retailer, url, search=False):
+        for key, (status, body) in pages.items():
+            if key in url:
+                return status, body
+        return 404, ""
+    f._get = get
+
+
+async def test_discover_by_barcode_verifies_the_product_page(hass):
+    f = quick(hass)
+    scripted(f, {"searchtext=4548736132580": (200, SEARCH),
+                 "/sony-wh-1000xm5-zwart/123/": (200, product_page("Sony WH-1000XM5", "299.00", "4548736132580"))})
+    url, how = await f.discover("bol", PRODUCT, force=True)
+    assert url == "https://www.bol.com/nl/p/sony-wh-1000xm5-zwart/123/" and how == "ean"
+    assert [t["kind"] for t in f.trace["bol"]] == ["page", "search"]       # the page was looked at, then the search logged
+
+
+async def test_discover_rejects_a_page_with_another_barcode(hass):
+    f = quick(hass)
+    scripted(f, {"searchtext": (200, SEARCH),
+                 "/sony-wh-1000xm5-zwart/123/": (200, product_page("Sony WH-1000XM5", "299.00", "4006381333931"))})
+    url, how = await f.discover("bol", PRODUCT, force=True)
+    assert url is None and how is None
+
+
+async def test_discover_by_name_when_the_barcode_finds_nothing(hass):
+    f = quick(hass)
+    product = {**PRODUCT, "ean": "4548736132580"}
+    scripted(f, {"searchtext=4548736132580": (200, "<html><body>geen resultaten</body></html>"),
+                 "searchtext=Sony": (200, SEARCH),
+                 "/sony-wh-1000xm5-zwart/123/": (200, product_page("Sony WH-1000XM5 draadloze koptelefoon", "289.00"))})
+    url, how = await f.discover("bol", product, force=True)
+    assert url and url.endswith("/123/") and how == "name"
+
+
+async def test_discover_blocked_pauses_the_shop(hass):
+    f = quick(hass)
+    scripted(f, {"searchtext": (403, "")})
+    url, how = await f.discover("bol", PRODUCT, force=True)
+    assert url is None and f.cooldown_left("bol") > 0 and "blocked" in f.discover_error["bol"]
+
+
+async def test_discover_says_when_the_results_come_from_javascript(hass):
+    f = quick(hass)
+    scripted(f, {"searchtext": (200, "<html><body><div id='app'></div></body></html>")})
+    url, _ = await f.discover("bol", PRODUCT, force=True)
+    assert url is None and "JavaScript" in f.discover_error["bol"]
+
+
+async def test_discover_without_a_search_address(hass):
+    f = quick(hass)
+    url, _ = await f.discover("unknown_shop", PRODUCT, force=True)
+    assert url is None and "no search URL" in f.discover_error["unknown_shop"]
+
+
+async def test_discover_takes_a_redirect_to_the_product_page(hass):
+    f = quick(hass)
+
+    async def get(retailer, url, search=False):
+        f.final_url[retailer] = "https://www.bol.com/nl/p/sony-wh-1000xm5-zwart/123/"
+        return 200, product_page("Sony WH-1000XM5 draadloze koptelefoon", "299.00", "4548736132580")
+    f._get = get
+    url, how = await f.discover("bol", PRODUCT, force=True)
+    assert url == "https://www.bol.com/nl/p/sony-wh-1000xm5-zwart/123/" and how == "ean"
+
+
+async def test_blocked_links_are_skipped(hass):
+    f = quick(hass)
+    scripted(f, {"searchtext": (200, SEARCH),
+                 "/sony-wh-1000xm5-zwart/123/": (200, product_page("Sony WH-1000XM5", "299.00", "4548736132580"))})
+    url, _ = await f.discover("bol", PRODUCT, force=True, skip={"/nl/p/sony-wh-1000xm5-zwart/123"})
+    assert url is None
+
+
+async def test_nothing_is_fetched_without_accepted_terms(hass):
+    from custom_components.argus import shops
+    from custom_components.argus.client import NotReady
+
+    shops.revoke()
+    f = quick(hass)
+    with pytest.raises(NotReady):
+        await f._get("bol", "https://www.bol.com/x")
+    parsed, err = await f.fetch_offer("bol", "https://www.bol.com/x")
+    assert parsed is None and "nothing is fetched" in err

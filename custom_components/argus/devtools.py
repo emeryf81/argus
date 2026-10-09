@@ -1,0 +1,214 @@
+"""Tools for troubleshooting (storage figures, cache resets, parser playground, test fetch, queue preview,
+outlier clean-up, a data check with safe repairs, what is planned when, the last jobs, debug logging and a debug
+dump). Admin only; nothing here runs on its own."""
+from __future__ import annotations
+
+import json
+import logging
+import re
+import time
+from statistics import median
+from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from .const import CATEGORIES, RETAILERS
+from .i18n import T
+from .models import normalize_product_id
+from .parsers import parse_page, retailer_from_url
+
+RESETS = ("relay_searched", "shop_js", "cooldowns", "manual", "trace", "suspects")
+OUTLIER_FACTOR = 3.0          # a history point more than 3× above or below the median of that link
+
+
+def stats(coord: Any) -> dict[str, Any]:
+    """How much is stored, and how big the store is."""
+    st = coord.store
+    offers = [o for per in st["offers"].values() for o in per.values()]
+    size = len(json.dumps(st, default=str))
+    biggest = sorted(((k, len(json.dumps(v, default=str))) for k, v in st.items()), key=lambda x: -x[1])[:8]
+    return {
+        "products": len(st["products"]), "links": sum(1 for o in offers if o.get("url")),
+        "history_points": sum(len(o.get("history") or []) for o in offers), "activity": len(st.get("activity", [])),
+        "events": len(st.get("events", [])), "reports": len(st.get("reports", [])),
+        "relay_searched": len(st.get("relay_searched", {})), "shop_js": sorted(st.get("shop_js", {})),
+        "suspects": sum(1 for o in offers if o.get("suspect")), "approved": sum(1 for o in offers if o.get("approved")),
+        "errors": sum(1 for o in offers if o.get("error")), "paused": coord.fetcher.paused(),
+        "manual_gates": len(coord._manual), "store_kb": round(size / 1024, 1),
+        "biggest": [{"key": k, "kb": round(n / 1024, 1)} for k, n in biggest],
+        "transport": coord.fetcher.transport, "debug": logging.getLogger(__package__).isEnabledFor(logging.DEBUG),
+    }
+
+
+def reset(coord: Any, what: str) -> int:
+    """Forget one kind of cached state; returns how many entries were removed."""
+    st, f = coord.store, coord.fetcher
+    if what in ("relay_searched", "shop_js"):
+        n = len(st.get(what, {}))
+        st[what] = {}
+    elif what == "cooldowns":
+        n = len(f.blocked_until)
+        f.reset_cooldowns()
+    elif what == "manual":
+        n = len(coord._manual)
+        coord._manual.clear()
+        f.last_request.clear()
+        f.last_search.clear()
+    elif what == "trace":
+        n = sum(len(v) for v in f.trace.values())
+        f.trace.clear()
+    elif what == "suspects":
+        n = 0
+        for per in st["offers"].values():
+            for o in per.values():
+                n += bool(o.pop("suspect", None)) + bool(o.pop("approved", None))
+    else:
+        raise ValueError(what)
+    coord.log("info", "meta", T("developer tools: {what} reset ({n})", what=what, n=n), source="user")
+    return n
+
+
+def parse(retailer: str | None, html: str, url: str = "") -> dict[str, Any]:
+    """What the parser reads from a page that was pasted (or fetched)."""
+    rid = retailer or (retailer_from_url(url) if url else None) or "generic"
+    p = parse_page(rid if rid in RETAILERS else "generic", html)
+    return {"retailer": rid, "price": p.price, "list_price": p.list_price, "title": p.title, "image": p.image,
+            "gtins": list(p.gtins), "mpn": p.mpn, "brand": p.brand, "category": p.category,
+            "blocked": p.blocked, "unavailable": p.unavailable, "size": len(html)}
+
+
+async def fetch(coord: Any, url: str) -> dict[str, Any]:
+    """Fetch one page like a check would (same pacing and same rules) and show what is read from it."""
+    rid = retailer_from_url(url)
+    if not rid:
+        raise ValueError(T("Not a shop the integration knows (add it under Shops first)."))
+    coord.manual_gate("site:" + coord._site(rid))
+    t0 = time.time()
+    status, page, error = await coord.fetcher.get_page(rid, url, force=True, note_block=False)
+    out = parse(rid, page or "", url) if page else {"retailer": rid}
+    return {**out, "status": status, "error": error, "ms": int((time.time() - t0) * 1000),
+            "final_url": coord.fetcher.final_url.get(rid), "head": (page or "")[:1500]}
+
+
+def outliers(coord: Any, apply: bool = False) -> list[dict[str, Any]]:
+    """History points far from the usual price of the same link (a wrong product or a lost comma).
+    Preview first; with apply they are removed."""
+    found = []
+    for pid, per in coord.store["offers"].items():
+        for rid, o in per.items():
+            hist = o.get("history") or []
+            if len(hist) < 4:
+                continue
+            mid = median(p for _, p in hist)
+            bad = [[ts, p] for ts, p in hist if mid and not mid / OUTLIER_FACTOR <= p <= mid * OUTLIER_FACTOR]
+            for ts, p in bad:
+                found.append({"product": pid, "retailer": rid, "shop": RETAILERS.get(rid, (rid,))[0], "ts": ts,
+                              "price": p, "usual": round(mid, 2)})
+            if apply and bad:
+                o["history"] = [h for h in hist if list(h) not in bad]
+    if apply and found:
+        coord.log("info", "price", T("developer tools: {n} outlier prices removed", n=len(found)), source="user")
+    return found
+
+
+def set_debug(on: bool) -> bool:
+    """Set the integration log level to DEBUG or INFO and return the requested toggle."""
+    logging.getLogger(__package__).setLevel(logging.DEBUG if on else logging.INFO)
+    return on
+
+
+SECRET_PARAM = re.compile(r"(key|token|secret|password|passwd|pwd|auth|sig|session|code)", re.I)
+
+
+def redact(value: Any) -> Any:
+    """URLs without credentials: user:password@ and secret-looking query values are replaced by ***
+    (only in the dump; the stored links stay as they are)."""
+    if isinstance(value, dict):
+        return {k: redact(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [redact(v) for v in value]
+    if not isinstance(value, str) or "://" not in value:
+        return value
+
+    def one(m: re.Match) -> str:
+        p = urlsplit(m.group(0))
+        if not p.scheme or not p.netloc:
+            return m.group(0)
+        host = p.hostname or ""
+        netloc = ("***@" if (p.username or p.password) else "") + host + (f":{p.port}" if p.port else "")
+        query = urlencode([(k, "***" if SECRET_PARAM.search(k) else v) for k, v in parse_qsl(p.query, keep_blank_values=True)], safe="*")
+        return urlunsplit((p.scheme, netloc, p.path, query, p.fragment))
+    return re.sub(r"https?://[^\s\"'<>]+", one, value)
+
+
+def dump(coord: Any) -> dict[str, Any]:
+    """Everything useful for a bug report, without credentials (download as JSON)."""
+    opts = {k: ("***" if any(w in k for w in ("key", "secret", "token", "password")) and v else v)
+            for k, v in dict(coord.entry.options).items()}
+    return redact({"ts": time.time(), "options": opts, "stats": stats(coord), "retailer_stats": coord.retailer_stats(),
+                   "trace": {k: list(v) for k, v in coord.fetcher.trace.items()},
+                   "queue": coord.continuous_items(50), "activity": coord.store.get("activity", [])[-300:]})
+
+
+# ------------------------------------------------------------------ data check
+def health(coord: Any, repair: bool = False) -> list[dict[str, Any]]:
+    """Inconsistencies in the stored data, each with how many, a few examples and whether a safe repair exists.
+    With repair, only the safe ones are fixed (nothing you entered yourself is changed)."""
+    st = coord.store
+    products, offers = st["products"], st["offers"]
+    found: list[dict[str, Any]] = []
+
+    def add(kind: str, items: list[Any], fix: Any = None) -> None:
+        if not items:
+            return
+        found.append({"kind": kind, "count": len(items), "examples": [str(x) for x in items[:8]], "repairable": fix is not None})
+        if repair and fix is not None:
+            fix(items)
+
+    add("orphan_offers", [n for n in offers if n not in products], None)        # history comes back when the product is added again
+    add("bad_product_ids", [n for n in products if normalize_product_id(n) != n], None)
+    add("unknown_categories", [f"{n}: {p.get('category')}" for n, p in products.items() if p.get("category") not in CATEGORIES], None)
+    gone = sorted({f"{n}/{r}" for n, per in offers.items() for r in per if r not in RETAILERS})
+    add("links_of_unknown_shops", gone, None)                                # a shop removed from the settings: history kept
+    unsorted = [f"{n}/{r}" for n, per in offers.items() for r, o in per.items()
+                if any(a[0] > b[0] for a, b in zip(o.get("history") or [], (o.get("history") or [])[1:]))]
+
+    def sort_hist(xs: list[str]) -> None:
+        for key in xs:
+            n, r = key.split("/", 1)
+            o = offers[n][r]
+            o["history"] = sorted({(h[0], h[1]) for h in o["history"]})
+            o["history"] = [list(h) for h in o["history"]]
+    add("unsorted_history", unsorted, sort_hist)
+    urls: dict[str, list[str]] = {}
+    for n, per in offers.items():
+        for r, o in per.items():
+            if o.get("url"):
+                urls.setdefault(o["url"].split("?")[0].rstrip("/").lower(), []).append(n)
+    add("same_link_for_several_products", [f"{u} ({', '.join(sorted(set(ns)))})" for u, ns in urls.items() if len(set(ns)) > 1], None)
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)  # noqa: E731 - stored data is not validated
+    add("suspicious_reference_prices", [f"{n}: {p.get('ref_price')}" for n, p in products.items()
+                                        if p.get("ref_price") and (not num(p["ref_price"]) or not 0.5 <= p["ref_price"] <= 50000)], None)
+    if repair and any(f["repairable"] for f in found):
+        coord.log("info", "meta", T("developer tools: data check repaired {n} kinds of problems",
+                                    n=sum(1 for f in found if f["repairable"])), source="user")
+    return found
+
+
+# ------------------------------------------------------------------ what is planned when
+def schedule(coord: Any) -> dict[str, Any]:
+    """When the automatic work runs next: price checks and paused shops."""
+    now = time.time()
+    info = coord.schedule_info()
+    return {
+        "now": now, "price_checks": {k: info.get(k) for k in ("mode", "next", "next_product", "per_hour", "cycle_hours", "checked_24h", "total")},
+        "paused": {RETAILERS.get(r, (r,))[0]: until for r, until in coord.fetcher.blocked_until.items() if until > now},
+    }
+
+
+def jobs(coord: Any) -> list[dict[str, Any]]:
+    """The last jobs, newest first, with their duration."""
+    out = []
+    for j in reversed(coord.store.get("job_history") or []):
+        took = (j.get("finished") or 0) - (j.get("started") or 0)
+        out.append({**j, "seconds": round(took) if took > 0 else None})
+    return out

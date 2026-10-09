@@ -1,0 +1,241 @@
+{
+  "format": "argus-shop-settings",
+  "version": 1,
+  "notice": "EXAMPLE ONLY. The search addresses are best guesses and are NOT checked against the live sites: test each shop under Manage → Parser lab and correct the address under Manage → Shops & jobs where it does not work. You decide yourself which websites your Home Assistant contacts and you are responsible for respecting their terms of use, robots.txt and the law that applies to you.",
+  "shops": [
+    {
+      "id": "amazon_be",
+      "name": "Amazon.com.be",
+      "domain": "amazon.com.be",
+      "reader": "marketplace",
+      "categories": [],
+      "search": "https://www.amazon.com.be/s?k={query}",
+      "aliases": [
+        "amazon.com.be",
+        "amazon belgië",
+        "amazon belgie",
+        "amazon"
+      ]
+    },
+    {
+      "id": "amazon_nl",
+      "name": "Amazon.nl",
+      "domain": "amazon.nl",
+      "reader": "marketplace",
+      "categories": [],
+      "search": "https://www.amazon.nl/s?k={query}",
+      "aliases": [
+        "amazon.nl",
+        "amazon nederland"
+      ]
+    },
+    {
+      "id": "bol",
+      "name": "bol",
+      "domain": "bol.com",
+      "reader": "retail",
+      "categories": [],
+      "search": "https://www.bol.com/be/nl/s/?searchtext={query}",
+      "aliases": [
+        "bol.com",
+        "bol"
+      ]
+    },
+    {
+      "id": "krefel",
+      "name": "Krëfel",
+      "domain": "krefel.be",
+      "reader": "retail",
+      "categories": [
+        "electronics",
+        "toys_games",
+        "home_garden_diy"
+      ],
+      "search": "https://www.krefel.be/nl/search?q={query}",
+      "aliases": [
+        "krefel",
+        "krëfel",
+        "krefel.be"
+      ]
+    },
+    {
+      "id": "vandenborre",
+      "name": "Vanden Borre",
+      "domain": "vandenborre.be",
+      "reader": "retail",
+      "categories": [
+        "electronics",
+        "home_garden_diy"
+      ],
+      "search": "https://www.vandenborre.be/nl/search?q={query}",
+      "aliases": [
+        "vanden borre",
+        "vandenborre",
+        "vandenborre.be"
+      ]
+    },
+    {
+      "id": "mediamarkt_be",
+      "name": "MediaMarkt",
+      "domain": "mediamarkt.be",
+      "reader": "generic",
+      "categories": [
+        "electronics",
+        "toys_games"
+      ],
+      "search": "https://www.mediamarkt.be/nl/search.html?query={query}",
+      "aliases": [
+        "mediamarkt",
+        "media markt",
+        "mediamarkt.be"
+      ]
+    },
+    {
+      "id": "coolblue_be",
+      "name": "Coolblue",
+      "domain": "coolblue.be",
+      "reader": "generic",
+      "categories": [
+        "electronics",
+        "home_garden_diy"
+      ],
+      "search": "https://www.coolblue.be/nl/zoeken?query={query}",
+      "aliases": [
+        "coolblue",
+        "coolblue.be"
+      ]
+    },
+    {
+      "id": "fnac_be",
+      "name": "Fnac",
+      "domain": "fnac.be",
+      "reader": "generic",
+      "categories": [
+        "electronics",
+        "books",
+        "toys_games"
+      ],
+      "search": "https://www.fnac.be/SearchResult/ResultList.aspx?Search={query}",
+      "aliases": [
+        "fnac",
+        "fnac.be"
+      ]
+    },
+    {
+      "id": "standaard_boekhandel",
+      "name": "Standaard Boekhandel",
+      "domain": "standaardboekhandel.be",
+      "reader": "generic",
+      "categories": [
+        "books",
+        "toys_games"
+      ],
+      "search": "https://www.standaardboekhandel.be/zoeken?q={query}",
+      "aliases": [
+        "standaard boekhandel",
+        "standaardboekhandel",
+        "standaardboekhandel.be"
+      ]
+    },
+    {
+      "id": "smyths_be",
+      "name": "Smyths Toys",
+      "domain": "smythstoys.com",
+      "reader": "generic",
+      "categories": [
+        "toys_games"
+      ],
+      "search": "https://www.smythstoys.com/be/nl-be/search?text={query}",
+      "aliases": [
+        "smyths toys",
+        "smyths",
+        "smythstoys",
+        "smythstoys.com"
+      ]
+    },
+    {
+      "id": "toychamp",
+      "name": "ToyChamp",
+      "domain": "toychamp.be",
+      "reader": "generic",
+      "categories": [
+        "toys_games"
+      ],
+      "search": "https://www.toychamp.be/nl/search?q={query}",
+      "aliases": [
+        "toychamp",
+        "toychamp.be"
+      ]
+    },
+    {
+      "id": "dreamland",
+      "name": "Dreamland",
+      "domain": "dreamland.be",
+      "reader": "generic",
+      "categories": [
+        "toys_games"
+      ],
+      "search": "https://www.dreamland.be/nl/search?q={query}",
+      "aliases": [
+        "dreamland",
+        "dreamland.be"
+      ]
+    },
+    {
+      "id": "brico",
+      "name": "Brico",
+      "domain": "brico.be",
+      "reader": "generic",
+      "categories": [
+        "home_garden_diy"
+      ],
+      "search": "https://www.brico.be/nl/search?q={query}",
+      "aliases": [
+        "brico",
+        "brico.be"
+      ]
+    },
+    {
+      "id": "gamma_be",
+      "name": "Gamma",
+      "domain": "gamma.be",
+      "reader": "generic",
+      "categories": [
+        "home_garden_diy"
+      ],
+      "search": "https://www.gamma.be/nl/zoeken?text={query}",
+      "aliases": [
+        "gamma",
+        "gamma.be"
+      ]
+    },
+    {
+      "id": "hubo",
+      "name": "Hubo",
+      "domain": "hubo.be",
+      "reader": "generic",
+      "categories": [
+        "home_garden_diy"
+      ],
+      "search": "https://www.hubo.be/nl/search?q={query}",
+      "aliases": [
+        "hubo",
+        "hubo.be"
+      ]
+    },
+    {
+      "id": "ikea_be",
+      "name": "IKEA",
+      "domain": "ikea.com",
+      "reader": "generic",
+      "categories": [
+        "home_garden_diy"
+      ],
+      "search": "https://www.ikea.com/be/nl/search/?q={query}",
+      "aliases": [
+        "ikea",
+        "ikea.com"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+add_product:
+  fields:
+    url: {example: "https://www.example-shop.be/p/sony-wh-1000xm5/9300000123/", selector: {text: {}}}
+    name: {selector: {text: {}}}
+    ean: {example: "4548736132580", selector: {text: {}}}
+    brand: {selector: {text: {}}}
+    model: {selector: {text: {}}}
+    category:
+      selector:
+        select:
+          translation_key: category
+          options: [electronics, books, toys_games, home_garden_diy, other]
+    reference_price: {selector: {number: {min: 0, max: 100000, step: 0.01, unit_of_measurement: EUR, mode: box}}}
+    target_price: {selector: {number: {min: 0, max: 100000, step: 0.01, unit_of_measurement: EUR, mode: box}}}
+    priority: {selector: {number: {min: 1, max: 3, mode: box}}}
+    notes: {selector: {text: {multiline: true}}}
+remove_product:
+  fields:
+    product: {required: true, selector: {text: {}}}
+find_shops:
+  fields:
+    product: {selector: {text: {}}}
+    force: {default: false, selector: {boolean: {}}}
+refresh:
+  fields:
+    product: {selector: {text: {}}}
+    force: {default: false, selector: {boolean: {}}}
+verify_links: {}
+confirm_offer:
+  fields:
+    product: {required: true, selector: {text: {}}}
+    retailer: {required: true, selector: {text: {}}}
+remove_offer:
+  fields:
+    product: {required: true, selector: {text: {}}}
+    retailer: {required: true, selector: {text: {}}}
+    block: {default: true, selector: {boolean: {}}}
+set_offer:
+  fields:
+    product: {required: true, selector: {text: {}}}
+    retailer: {required: true, selector: {text: {}}}
+    url: {required: true, selector: {text: {}}}
+fix_offer:
+  fields:
+    product: {required: true, selector: {text: {}}}
+    retailer: {required: true, selector: {text: {}}}
+    url: {selector: {text: {}}}
+    price: {selector: {number: {min: 0.01, max: 100000, step: 0.01, unit_of_measurement: EUR, mode: box}}}
+cancel_job: {}
+export_products: {}
+export_data: {}
+import_data:
+  fields:
+    data: {selector: {object: {}}}
+    file_path: {example: "/config/argus_backup.json", selector: {text: {}}}
+    merge: {default: false, selector: {boolean: {}}}
+import_products:
+  fields:
+    csv_text: {selector: {text: {multiline: true}}}
+    file_path: {example: "/config/argus_products.csv", selector: {text: {}}}
+    discover: {default: true, selector: {boolean: {}}}
+report_price:
+  fields:
+    price: {required: true, selector: {number: {min: 0.01, max: 100000, step: 0.01, unit_of_measurement: EUR, mode: box}}}
+    url: {example: "https://www.example-shop.be/p/sony-wh-1000xm5/9300000123/", selector: {text: {}}}
+    product: {selector: {text: {}}}
+    retailer: {selector: {text: {}}}
+    title: {selector: {text: {}}}
+    via:
+      selector:
+        select:
+          options: [userscript, relay]
+    gtins: {selector: {object: {}}}
+send_digest: {}
