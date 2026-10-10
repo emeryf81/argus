@@ -29,6 +29,7 @@ EVENT_NOTIFICATION = f"{DOMAIN}_notification"
 # trigger id -> (label, per-product?, parameter)
 TRIGGERS: dict[str, tuple[str, bool, str | None]] = {
     "target_hit": ("Target price reached", True, None),
+    "my_alert": ("Your deal alert on the product (10–50% cheaper)", True, None),
     "all_time_low": ("Lowest price so far", True, None),
     "discount": ("Discount vs reference or 90-day price", True, "discount_pct"),
     "price_below": ("Price below an amount", True, "price_below"),
@@ -55,7 +56,7 @@ def default_rules(threshold: float, notify_service: str = "") -> list[dict[str, 
         targets.append({"type": "mobile" if "mobile_app_" in svc else "notify", "service": svc})
     return [
         {"id": "deals", "name": "All deals", "enabled": True, "scope": {"type": "all"},
-         "triggers": ["target_hit", "all_time_low", "discount"], "params": {"discount_pct": int(threshold)},
+         "triggers": ["target_hit", "my_alert", "all_time_low", "discount"], "params": {"discount_pct": int(threshold)},
          "shops": [], "targets": targets, "cooldown_hours": 24, "quiet": None, "image": True, "link": True},
         {"id": "digest", "name": "Daily digest", "enabled": True, "scope": {"type": "all"},
          "triggers": ["digest"], "params": {}, "shops": [], "targets": list(targets), "cooldown_hours": 0,
@@ -180,6 +181,11 @@ def product_triggers(rule: dict[str, Any], before: dict[str, Any], after: dict[s
             b = before.get("discount_ref") if before.get("discount_ref") is not None else before.get("discount_avg")
             if d is not None and d >= p["discount_pct"] and (b is None or b < p["discount_pct"] or old is None):
                 out.append((t, tr("−{pct}% vs usual price", pct=f"{d:.0f}")))
+        elif t == "my_alert" and (pct := after.get("alert_pct")):
+            d = after.get("discount_avg") if after.get("discount_avg") is not None else after.get("discount_ref")
+            b = before.get("discount_avg") if before.get("discount_avg") is not None else before.get("discount_ref")
+            if d is not None and d >= pct and (b is None or b < pct or old is None):
+                out.append((t, tr("{pct}% cheaper than usual (your alert: {alert}%)", pct=f"{d:.0f}", alert=pct)))
         elif t == "target_hit" and after.get("target_hit") and not before.get("target_hit"):
             out.append((t, tr("below your target price")))
         elif t == "price_below" and price <= p["price_below"] and (old is None or old > p["price_below"]):

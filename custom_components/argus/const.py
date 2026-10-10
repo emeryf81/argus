@@ -84,3 +84,9 @@ EVENT_JOB_DONE = f"{DOMAIN}_job_finished"
 
 # Max price observations kept per offer (one per day is ~10 years).
 MAX_HISTORY = 4000
+
+# Deal alert per product: "tell me when it is suddenly this much cheaper than usual"
+ALERT_STEPS = (10, 20, 30, 40, 50)
+# Comparison sites: how often a product's offers are asked there, and how long their price may stand in for a shop
+FINDER_ROUND_HOURS = 12
+FINDER_PRICE_MAX_AGE = 72 * 3600

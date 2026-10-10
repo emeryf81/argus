@@ -228,42 +228,48 @@
       "name": "DuckDuckGo",
       "kind": "websearch",
       "domain": "duckduckgo.com",
-      "search": "https://html.duckduckgo.com/html/?q={query}"
+      "search": "https://html.duckduckgo.com/html/?q={query}",
+      "mark": "d"
     },
     {
       "id": "bing",
       "name": "Bing",
       "kind": "websearch",
       "domain": "bing.com",
-      "search": "https://www.bing.com/search?q={query}&setlang=nl"
+      "search": "https://www.bing.com/search?q={query}&setlang=nl",
+      "mark": "m"
     },
     {
       "id": "google",
       "name": "Google",
       "kind": "websearch",
       "domain": "google.com",
-      "search": "https://www.google.com/search?q={query}&hl=nl&gl=be"
+      "search": "https://www.google.com/search?q={query}&hl=nl&gl=be",
+      "mark": "g"
     },
     {
       "id": "google_shopping",
       "name": "Google Shopping",
       "kind": "aggregator",
       "domain": "google.com",
-      "search": "https://www.google.com/search?tbm=shop&q={query}&hl=nl&gl=be"
+      "search": "https://www.google.com/search?tbm=shop&q={query}&hl=nl&gl=be",
+      "mark": "g"
     },
     {
       "id": "bing_shopping",
       "name": "Bing Shopping",
       "kind": "aggregator",
       "domain": "bing.com",
-      "search": "https://www.bing.com/shop?q={query}&setlang=nl"
+      "search": "https://www.bing.com/shop?q={query}&setlang=nl",
+      "mark": "m"
     },
     {
       "id": "kelkoo",
       "name": "Kelkoo",
       "kind": "aggregator",
       "domain": "kelkoo.be",
-      "search": "https://www.kelkoo.be/search?query={query}"
+      "search": "https://www.kelkoo.be/search?query={query}",
+      "mark": "k"
     }
   ]
 }

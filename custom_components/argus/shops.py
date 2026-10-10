@@ -38,6 +38,8 @@ ALIASES: list[tuple[str, str]] = []                 # (shop name as written else
 CATEGORY_OF: dict[str, tuple[str, ...]] = {}        # shop id -> categories it sells (empty = every category)
 FINDERS: dict[str, dict[str, Any]] = {}            # finder id -> {id, name, kind, domain, search}
 ENABLED_FINDERS: set[str] = set()
+AUTO_SHOPS: dict[str, dict[str, Any]] = {}          # shops found through comparison sites (kept in the store)
+MAX_AUTO_SHOPS = 40
 STATE = {"profile": False, "legal": False}
 
 
@@ -102,7 +104,7 @@ def validate_settings(data: Any) -> dict[str, Any]:
         if not isinstance(raw, dict):
             raise LocalizedError("Every shop must be an object with id, name, domain and reader.")
         rid, name, domain = str(raw.get("id") or "").strip(), str(raw.get("name") or "").strip()[:40], _domain(raw.get("domain"))
-        if not re.fullmatch(r"[a-z][a-z0-9_]{1,39}", rid) or rid.startswith("c_") or rid in seen:
+        if not re.fullmatch(r"[a-z][a-z0-9_]{1,39}", rid) or rid.startswith(("c_", "a_")) or rid in seen:
             raise LocalizedError("Shop id {id}: use lowercase letters, digits and _, unique, not starting with c_.", id=rid)
         if not name or not re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", domain):
             raise LocalizedError("Shop {id}: a name and a valid domain are needed.", id=rid)
@@ -140,7 +142,9 @@ def validate_settings(data: Any) -> dict[str, Any]:
         if not _https_on(search, domain) or not valid_search(search):
             raise LocalizedError("Finder {id}: the search URL must start with https://, be on the finder's domain and contain {query} or {ean}.", id=fid)
         fseen.add(fid)
-        finders.append({"id": fid, "name": name, "kind": raw["kind"], "domain": domain, "search": search})
+        mark = str(raw.get("mark") or "").strip().lower()
+        finders.append({"id": fid, "name": name, "kind": raw["kind"], "domain": domain, "search": search,
+                        **({"mark": mark} if re.fullmatch(r"[a-z]", mark) else {})})
     if len(finders) > MAX_FINDERS:
         raise LocalizedError("At most {n} finders in one settings file.", n=MAX_FINDERS)
     if not shops:
@@ -213,6 +217,7 @@ def apply_shop_options(options: dict[str, Any]) -> None:
         RETAILERS[s["id"]] = (s["name"], "EUR")
         GENERIC_SHOPS[s["id"]] = {"domain": s["domain"], "search": s["search"]}
         CATEGORY_OF[s["id"]] = tuple(s["categories"])
+    _add_auto_shops()
     SEARCH.clear()
     SEARCH.update(DEFAULT_SEARCH)
     for rid, g in GENERIC_SHOPS.items():
@@ -223,6 +228,33 @@ def apply_shop_options(options: dict[str, Any]) -> None:
             SEARCH[rid] = tpl
             if rid in GENERIC_SHOPS:
                 GENERIC_SHOPS[rid]["search"] = tpl
+
+
+def auto_shop_id(domain: str) -> str:
+    return "a_" + re.sub(r"[^a-z0-9]+", "_", domain.lower().removeprefix("www.")).strip("_")[:36]
+
+
+def _add_auto_shops() -> None:
+    for s in AUTO_SHOPS.values():
+        if s["id"] in RETAILERS or any(_on("https://" + s["domain"], d) for d in all_domains().values()):
+            continue
+        RETAILERS[s["id"]] = (s["name"], "EUR")
+        GENERIC_SHOPS[s["id"]] = {"domain": s["domain"], "search": ""}
+        CATEGORY_OF[s["id"]] = tuple(s.get("categories") or ())
+
+
+def set_auto_shops(items: Any) -> None:
+    """(Re)register the shops ARGUS found itself through comparison sites (stored in the integration's data)."""
+    for rid in list(AUTO_SHOPS):
+        if rid in RETAILERS and rid not in PROFILE:
+            RETAILERS.pop(rid, None)
+            GENERIC_SHOPS.pop(rid, None)
+            CATEGORY_OF.pop(rid, None)
+    AUTO_SHOPS.clear()
+    for s in (items or [])[:MAX_AUTO_SHOPS]:
+        if isinstance(s, dict) and s.get("id", "").startswith("a_") and s.get("domain"):
+            AUTO_SHOPS[s["id"]] = s
+    _add_auto_shops()
 
 
 def export_settings(options: dict[str, Any]) -> dict[str, Any]:

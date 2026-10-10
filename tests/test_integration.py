@@ -491,3 +491,63 @@ def test_extract_unpacks_redirects_and_ignores_search_pages_and_accessories():
     assert [c["url"] for c in got["mediamarkt_be"]] == ["https://www.mediamarkt.be/nl/product/_sony-wh-1000xm5-123.html"]
     assert [c["url"] for c in got["krefel"]] == ["https://www.krefel.be/nl/p/sony-wh-1000xm5/5"]
     assert [c["url"] for c in got["bol"]] == ["https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/"]
+
+
+KELKOO = ("<html><body>"
+          '<div class="offer"><a href="https://www.kelkoo.be/go?url=https%3A%2F%2Fwww.bol.com%2Fbe%2Fnl%2Fp%2Fsony-wh-1000xm5%2F9300001%2F">'
+          "Sony WH-1000XM5 draadloze koptelefoon</a> <span>bol</span> <span>€ 279,00</span> <small>Door Shoparize</small></div>"
+          '<div class="offer"><a href="https://www.kelkoo.be/go?url=https%3A%2F%2Fwww.exellent.be%2Fnl%2Fsony-wh-1000xm5-zwart%2F123">'
+          "Sony WH-1000XM5 draadloze koptelefoon zwart</a> <span>Exellent</span> <span>269,95 €</span> <small>By Producthero</small></div>"
+          "</body></html>")
+
+
+async def test_comparison_site_prices_with_service_mark_and_new_shops(hass: HomeAssistant, entry, world):
+    """bol can't be read (blocked): the price the comparison site shows for bol is used, marked with the service that
+    shows it (ⓢ Shoparize); a shop that is not in the list yet (Exellent, via Producthero) is added with its price."""
+    world.pages["kelkoo.be/search"] = (200, KELKOO)
+    coord = await setup(hass, entry)
+    pid = (await coord.add_product("https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/", discover=False))["id"]
+    await coord.discover_product(pid)
+    world.pages["bol.com/be/nl/p/sony-wh-1000xm5/9300001/"] = (403, "blocked")
+    world.pages["exellent.be"] = (403, "blocked")
+    coord.fetcher.reset_cooldowns()
+    await coord.refresh_product(pid, list(coord.retailers), force=True)
+    offers = coord.store["offers"][pid]
+    assert offers["bol"]["last_price"] == 279.0 and offers["bol"]["last_via"] == "css:shoparize"
+    assert "a_exellent_be" in coord.store["auto_shops"] and "a_exellent_be" in coord.retailers
+    assert offers["a_exellent_be"]["last_price"] == 269.95 and offers["a_exellent_be"]["last_via"] == "css:producthero"
+    assert offers["a_exellent_be"]["url"] == "https://www.exellent.be/nl/sony-wh-1000xm5-zwart/123"
+    status = coord.compute()["statuses"][pid]
+    assert status["best_retailer"] == "a_exellent_be" and status["best_price"] == 269.95
+
+
+async def test_add_by_name_finds_the_barcode_and_by_barcode_finds_the_name(hass: HomeAssistant, entry, world):
+    world.pages["kelkoo.be/search?query=Sony+WH-1000XM5"] = (200, search(
+        ("https://www.krefel.be/nl/p/sony-wh-1000xm5-zwart/55/", "Sony WH-1000XM5 koptelefoon zwart"),
+        ("https://www.vandenborre.be/nl/p/sony-wh-1000xm5/77/", "Sony WH-1000XM5 draadloze koptelefoon")))
+    world.pages["vandenborre.be/nl/p/sony-wh-1000xm5/77/"] = (200, page("Sony WH-1000XM5 draadloze koptelefoon", 315.0, EAN))
+    coord = await setup(hass, entry)
+    prev = await coord.preview_product(name="Sony WH-1000XM5")
+    assert prev["ean"] == EAN and prev["ean_sure"] is True                     # two pages agree on the barcode
+    assert prev["category"] == "electronics"
+    sugg = {s["id"]: s["suggested"] for s in prev["shops"]}
+    assert sugg["krefel"] and sugg["vandenborre"]
+    world.pages["kelkoo.be/search?query=" + EAN] = (200, search(("https://www.krefel.be/nl/p/sony-wh-1000xm5-zwart/55/", "x")))
+    by_ean = await coord.preview_product(ean=EAN)
+    assert by_ean["name"].startswith("Sony WH-1000XM5") and by_ean["ean"] == EAN
+    res = await coord.add_product(None, name=prev["name"], ean=prev["ean"], shops=["krefel", "vandenborre"], alert_pct=20, discover=False)
+    p = coord.store["products"][res["id"]]
+    assert p["shops"] == ["krefel", "vandenborre"] and p["alert_pct"] == 20
+    assert set(coord.store["offers"][res["id"]]) >= {"krefel"}                   # the pages that proved it are linked right away
+    assert coord.shops_for(res["id"]) == ["krefel", "vandenborre"]              # only the shops you chose
+
+
+def test_deal_alert_fires_when_the_product_is_suddenly_cheaper():
+    from custom_components.argus.notifications import product_triggers
+
+    rule = {"triggers": ["my_alert"], "params": {}, "shops": []}
+    before = {"best_price": 300.0, "discount_avg": 5.0, "alert_pct": 20}
+    after = {"best_price": 230.0, "discount_avg": 23.0, "alert_pct": 20}
+    assert [t for t, _ in product_triggers(rule, before, after)] == ["my_alert"]
+    assert product_triggers(rule, before, {**after, "discount_avg": 15.0}) == []
+    assert product_triggers(rule, after, after) == []                             # only once, when it crosses the line
