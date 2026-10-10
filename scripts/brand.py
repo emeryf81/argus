@@ -1,12 +1,13 @@
 """ARGUS brand kit generator: icon, logo (light/dark), banner, social preview.
 
 Design system
-- Night   #0B1020 / #141B33  (background, text on light)
-- Gold    #E8B84A  light #F6D77E  dark #B8862B  (the eyes)
+- Night   #0A1029 / #141D45  (background, text on light)
+- Gold    #E9B949  light #F8DC8C  dark #B98A22  (the eyes)
+- Teal    #27B7A8  (the peacock feather)  · Green #3DDC84 (the lowest price)
 - Cream   #FFF3D6  (the whites of the eyes, text on dark)
 - Slate   #5D6680 / #9AA6C2  (secondary text)
-Mark: Argus Panoptes, the giant with a hundred eyes — a face whose forehead, temples and cheeks are covered with eyes, two big
-ones in the middle. Type: Inter ExtraBold / SemiBold (OFL), converted to paths so the SVGs need no font.
+Mark: Argus Panoptes, the giant with a hundred eyes. After he died Hera set his eyes on the peacock's tail: the mark is
+his eye in front of a fan of peacock-feather eyes. Banner: the same, with a falling price line and its lowest point. Type: Inter ExtraBold / SemiBold (OFL), converted to paths so the SVGs need no font.
 
 Usage: `python scripts/brand.py <inter-extrabold.otf> <inter-semibold.otf> [outdir]` (needs fonttools) writes the SVGs;
 render the PNGs from them with any browser (see the commented block at the bottom).
@@ -21,9 +22,11 @@ from fontTools.pens.svgPathPen import SVGPathPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTFont
 
-NIGHT, NIGHT2, NIGHT3 = "#0B1020", "#141B33", "#1E2747"
-GOLD, GOLD_L, GOLD_D = "#E8B84A", "#F6D77E", "#B8862B"
-CREAM, SLATE, SLATE_L = "#FFF3D6", "#5D6680", "#9AA6C2"
+NIGHT, NIGHT2, NIGHT3 = "#0A1029", "#141D45", "#1C2756"
+GOLD, GOLD_L, GOLD_D = "#E9B949", "#F8DC8C", "#B98A22"
+TEAL, TEAL_D = "#27B7A8", "#127A78"
+CREAM, SLATE, SLATE_L = "#FFF4DA", "#5D6680", "#A3ADC8"
+GREEN = "#3DDC84"
 
 
 def text_path(font: TTFont, s: str, x: float, y: float, size: float, tracking: float = 0.0, anchor: str = "start") -> tuple[str, float]:
@@ -46,55 +49,70 @@ def text_path(font: TTFont, s: str, x: float, y: float, size: float, tracking: f
     return " ".join(d), width
 
 
-def eye(cx: float, cy: float, w: float, rot: float = 0.0, look: tuple[float, float] = (0.0, 0.0), ring: bool = True) -> str:
-    """One almond-shaped eye of half-width w, centred on (cx, cy), rotated by rot degrees."""
-    h = w * 0.62
-    almond = f"M{-w:.2f},0 Q0,{-h * 1.7:.2f} {w:.2f},0 Q0,{h * 1.7:.2f} {-w:.2f},0Z"
-    r = h * 0.98
-    ix, iy = look[0] * w * 0.28, look[1] * h * 0.2
-    clip = f"e{abs(hash((round(cx), round(cy), round(w)))):x}"
-    return (f'<g transform="translate({cx:.2f} {cy:.2f}) rotate({rot:.1f})"><clipPath id="{clip}"><path d="{almond}"/></clipPath>'
-            f'<path d="{almond}" fill="{CREAM}"/><g clip-path="url(#{clip})">'
-            f'<circle cx="{ix:.2f}" cy="{iy:.2f}" r="{r:.2f}" fill="{GOLD}"/><circle cx="{ix:.2f}" cy="{iy:.2f}" r="{r * 0.62:.2f}" fill="{GOLD_D}"/>'
-            f'<circle cx="{ix:.2f}" cy="{iy:.2f}" r="{r * 0.36:.2f}" fill="{NIGHT}"/>'
-            f'<circle cx="{ix - r * 0.22:.2f}" cy="{iy - r * 0.26:.2f}" r="{r * 0.14:.2f}" fill="{CREAM}"/></g>'
-            + (f'<path d="{almond}" fill="none" stroke="{GOLD_L}" stroke-width="{max(w * 0.07, 0.6):.2f}" stroke-linejoin="round"/>' if ring else "")
-            + "</g>")
+def ocellus(cx: float, cy: float, r: float, rot: float = 0.0) -> str:
+    """One 'eye' of a peacock feather (the eyes Hera set on the peacock's tail after Argus died): a gold drop with a
+    teal ring and a dark pupil, slightly pointed towards the feather's tip."""
+    drop = lambda k: (f"M0,{-r * k * 1.25:.2f} C{r * k * .95:.2f},{-r * k * .55:.2f} {r * k:.2f},{r * k * .55:.2f} 0,{r * k:.2f}"  # noqa: E731
+                      f" C{-r * k:.2f},{r * k * .55:.2f} {-r * k * .95:.2f},{-r * k * .55:.2f} 0,{-r * k * 1.25:.2f}Z")
+    return (f'<g transform="translate({cx:.2f} {cy:.2f}) rotate({rot:.1f})"><path d="{drop(1)}" fill="url(#gold)"/>'
+            f'<path d="{drop(.72)}" fill="{TEAL}"/><path d="{drop(.48)}" fill="{NIGHT}"/>'
+            f'<circle cx="{-r * .14:.2f}" cy="{-r * .18:.2f}" r="{r * .12:.2f}" fill="{CREAM}" fill-opacity=".9"/></g>')
 
 
 def mark(size: float = 512, tile: bool = True) -> str:
-    """The emblem on a 512×512 canvas: a face with eyes everywhere; tile=True puts it on a dark rounded square."""
+    """The emblem on a 512×512 canvas: Argus' eye in front of a fan of peacock-feather eyes (his hundred eyes)."""
     s = []
     if tile:
-        s.append(f'<rect width="512" height="512" rx="112" fill="url(#bg)"/>')
-        s.append(f'<circle cx="256" cy="262" r="214" fill="none" stroke="{GOLD}" stroke-opacity=".18" stroke-width="3"/>')
-    # radiating halo of small eyes behind the head (the peacock fan of the myth)
-    for i in range(15):
-        a = math.radians(-180 + 12 + i * (156 / 14))
-        cx, cy = 256 + math.cos(a) * 196, 268 + math.sin(a) * 178
-        s.append(eye(cx, cy, 17, math.degrees(a) + 90, (math.cos(a) * 0.6, math.sin(a) * 0.6)))
-    # the head
-    s.append(f'<path d="M256 96 C170 96 126 160 126 238 C126 300 148 346 184 380 C206 400 228 412 256 412 C284 412 306 400 328 380'
-             f' C364 346 386 300 386 238 C386 160 342 96 256 96Z" fill="{NIGHT3}" stroke="{GOLD}" stroke-width="5"/>')
-    # brow band, nose, mouth, beard hint
-    s.append(f'<path d="M150 214 Q256 176 362 214" fill="none" stroke="{GOLD_D}" stroke-width="5" stroke-linecap="round"/>')
-    s.append(f'<path d="M256 258 L242 318 Q256 330 270 318Z" fill="none" stroke="{GOLD}" stroke-width="5" stroke-linejoin="round"/>')
-    s.append(f'<path d="M222 358 Q256 376 290 358" fill="none" stroke="{GOLD}" stroke-width="6" stroke-linecap="round"/>')
-    # forehead row, temples and cheeks
-    for cx, cy, w, r in [(196, 150, 15, -14), (226, 130, 14, -6), (256, 124, 14, 0), (286, 130, 14, 6), (316, 150, 15, 14),
-                         (160, 192, 12, -24), (352, 192, 12, 24),
-                         (142, 262, 13, -18), (370, 262, 13, 18), (162, 318, 12, -26), (350, 318, 12, 26),
-                         (200, 384, 11, -20), (312, 384, 11, 20)]:
-        s.append(eye(cx, cy, w, r, ((cx - 256) / 120, 0.2)))
-    # the two big eyes
-    s.append(eye(204, 236, 38, -4, (0.5, 0.15)))
-    s.append(eye(308, 236, 38, 4, (-0.5, 0.15)))
+        s.append('<rect width="512" height="512" rx="116" fill="url(#bg)"/>')
+        s.append('<rect width="512" height="512" rx="116" fill="url(#glow)"/>')
+    cx, cy = 256, 318                                       # the fan grows from behind the big eye
+    n = 11
+    for i in range(n):                                      # the feathers: a thin shaft and an eye at the tip
+        a = math.radians(-180 + 14 + i * (152 / (n - 1)))
+        L = 196 if i % 2 == 0 else 168
+        tx, ty = cx + math.cos(a) * L, cy + math.sin(a) * L
+        s.append(f'<path d="M{cx},{cy} L{tx:.1f},{ty:.1f}" stroke="{GOLD_D}" stroke-opacity=".55" stroke-width="3" stroke-linecap="round"/>')
+        r = 25 if i % 2 == 0 else 19
+        s.append(ocellus(tx, ty, r, math.degrees(a) + 90))
+    # the big eye
+    w, h = 132, 76
+    almond = f"M{cx - w},{cy} C{cx - w * .5},{cy - h * 1.15} {cx + w * .5},{cy - h * 1.15} {cx + w},{cy} C{cx + w * .5},{cy + h * 1.15} {cx - w * .5},{cy + h * 1.15} {cx - w},{cy}Z"
+    s.append(f'<path d="{almond}" fill="{CREAM}"/>')
+    s.append(f'<clipPath id="eyeclip"><path d="{almond}"/></clipPath><g clip-path="url(#eyeclip)">'
+             f'<circle cx="{cx}" cy="{cy}" r="62" fill="url(#iris)"/>'
+             f'<circle cx="{cx}" cy="{cy}" r="62" fill="none" stroke="{NIGHT}" stroke-opacity=".35" stroke-width="4"/>'
+             f'<circle cx="{cx}" cy="{cy}" r="27" fill="{NIGHT}"/>'
+             f'<circle cx="{cx - 19}" cy="{cy - 22}" r="11" fill="#fff" fill-opacity=".95"/>'
+             f'<circle cx="{cx + 16}" cy="{cy + 17}" r="5" fill="#fff" fill-opacity=".6"/></g>')
+    s.append(f'<path d="{almond}" fill="none" stroke="url(#gold)" stroke-width="10" stroke-linejoin="round"/>')
     return "".join(s)
 
 
 def defs() -> str:
     return (f'<defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{NIGHT2}"/><stop offset="1" stop-color="{NIGHT}"/></linearGradient>'
-            f'<linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{GOLD_L}"/><stop offset="1" stop-color="{GOLD}"/></linearGradient></defs>')
+            f'<radialGradient id="glow" cx=".5" cy=".62" r=".55"><stop offset="0" stop-color="{GOLD}" stop-opacity=".22"/><stop offset="1" stop-color="{GOLD}" stop-opacity="0"/></radialGradient>'
+            f'<radialGradient id="iris" cx=".42" cy=".38" r=".7"><stop offset="0" stop-color="{GOLD_L}"/><stop offset=".55" stop-color="{GOLD}"/><stop offset="1" stop-color="{TEAL_D}"/></radialGradient>'
+            f'<linearGradient id="gold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{GOLD_L}"/><stop offset="1" stop-color="{GOLD}"/></linearGradient>'
+            f'<linearGradient id="fade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="{GOLD}" stop-opacity="0"/><stop offset=".25" stop-color="{GOLD}" stop-opacity=".55"/><stop offset="1" stop-color="{GOLD}" stop-opacity=".9"/></linearGradient></defs>')
+
+
+def price_line(x0: float, y0: float, w: float, h: float) -> str:
+    """A falling price line with its lowest point marked: what ARGUS watches for."""
+    pts = [(0, .25), (.08, .2), (.16, .34), (.25, .3), (.34, .48), (.43, .42), (.52, .6), (.6, .55), (.7, .78), (.78, .7),
+           (.87, .92), (.95, .84), (1, .88)]
+    d = " ".join(f"{'M' if i == 0 else 'L'}{x0 + x * w:.1f},{y0 + y * h:.1f}" for i, (x, y) in enumerate(pts))
+    lx, ly = x0 + .87 * w, y0 + .92 * h
+    return (f'<path d="{d}" fill="none" stroke="url(#fade)" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>'
+            f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="14" fill="{GREEN}" fill-opacity=".18"/><circle cx="{lx:.1f}" cy="{ly:.1f}" r="7" fill="{GREEN}"/>')
+
+
+def dots(w: int, h: int, step: int = 34) -> str:
+    """A quiet field of tiny eyes in the background."""
+    out = []
+    for y in range(step // 2, h, step):
+        for x in range(step // 2 + (step // 2 if (y // step) % 2 else 0), w, step):
+            out.append(f'<circle cx="{x}" cy="{y}" r="1.6" fill="{GOLD}" fill-opacity=".10"/>')
+    return "".join(out)
 
 
 def svg(w: int, h: int, body: str, bg: str | None = None) -> str:
@@ -112,23 +130,31 @@ def build(extrabold: Path, semibold: Path, out: Path) -> None:
         word, ww = text_path(xb, "ARGUS", 0, 0, 120, 0.06)
         line, lw = text_path(sb, "Altijd Rondkijken, Goedkoopste Uitzoeken, Snel melden", 0, 0, 25, 0.0)
         W = 512 + 40 + max(ww, lw) + 40
-        body = (f'<g transform="translate(0 0)">{m}</g><g transform="translate(552 270)"><path d="{word}" fill="url(#gold)"/></g>'
+        body = (f'<g transform="translate(0 0)">{m}</g><g transform="translate(552 270)"><path d="{word}" fill="{"url(#gold)" if fg == CREAM else NIGHT2}"/></g>'
                 f'<g transform="translate(556 330)"><path d="{line}" fill="{sub}"/></g>')
         (out / f"{name}.svg").write_text(svg(int(W), 512, body))
-    # banner 1280×320 (README) and social preview 1280×640, dark
-    word, ww = text_path(xb, "ARGUS", 0, 0, 150, 0.06)
-    line, lw = text_path(sb, "Altijd Rondkijken, Goedkoopste Uitzoeken,", 0, 0, 30, 0.0)
-    line2, _ = text_path(sb, "Snel melden", 0, 0, 30, 0.0)
-    tag, tw = text_path(sb, "Price watcher for Home Assistant", 0, 0, 26, 0.0)
-    banner = (f'<g transform="translate(60 24) scale(.5625)">{m}</g><g transform="translate(400 170)"><path d="{word}" fill="url(#gold)"/></g>'
-              f'<g transform="translate(404 214)"><path d="{line}" fill="{SLATE_L}"/></g><g transform="translate(404 252)"><path d="{line2}" fill="{SLATE_L}"/></g>'
-              f'<g transform="translate(404 296)"><path d="{tag}" fill="{CREAM}" fill-opacity=".7"/></g>')
-    (out / "banner.svg").write_text(svg(1280, 320, banner, NIGHT))
-    social = (f'<g transform="translate(110 112) scale(.82)">{m}</g><g transform="translate(570 292)"><path d="{word}" fill="url(#gold)"/></g>'
-              f'<g transform="translate(574 352)"><path d="{line}" fill="{SLATE_L}"/></g><g transform="translate(574 394)"><path d="{line2}" fill="{SLATE_L}"/></g>'
-              f'<g transform="translate(574 456)"><path d="{tag}" fill="{CREAM}" fill-opacity=".7"/></g>')
+    # README banner 1600×480 and social preview 1280×640 (dark)
+    word, ww = text_path(xb, "ARGUS", 0, 0, 168, 0.08)
+    line, lw = text_path(sb, "Altijd Rondkijken, Goedkoopste Uitzoeken, Snel melden", 0, 0, 30, 0.0)
+    tag, tw = text_path(sb, "Watches prices across every shop · alerts you at the right moment", 0, 0, 26, 0.0)
+    tag_nl, _ = text_path(sb, "Houdt prijzen in het oog bij elke winkel · meldt het juiste moment", 0, 0, 24, 0.0)
+    banner = (f'{dots(1600, 480)}<rect width="1600" height="480" fill="url(#glow)" opacity=".7"/>{price_line(548, 412, 1010, 44)}'
+              f'<g transform="translate(70 34) scale(.80)">{mark(tile=False)}</g>'
+              f'<g transform="translate(540 236)"><path d="{word}" fill="url(#gold)"/></g>'
+              f'<g transform="translate(546 290)"><path d="{line}" fill="{SLATE_L}"/></g>'
+              f'<g transform="translate(546 346)"><path d="{tag}" fill="{CREAM}" fill-opacity=".85"/></g>'
+              f'<g transform="translate(546 384)"><path d="{tag_nl}" fill="{CREAM}" fill-opacity=".55"/></g>')
+    (out / "banner.svg").write_text(svg(1600, 480, banner, NIGHT))
+    word2, _ = text_path(xb, "ARGUS", 0, 0, 150, 0.08)
+    tag_s, _ = text_path(sb, "Houdt prijzen in het oog bij elke winkel", 0, 0, 24, 0.0)
+    line2a, _ = text_path(sb, "Altijd Rondkijken, Goedkoopste Uitzoeken,", 0, 0, 30, 0.0)
+    line2b, _ = text_path(sb, "Snel melden", 0, 0, 30, 0.0)
+    social = (f'{dots(1280, 640)}<rect width="1280" height="640" fill="url(#glow)" opacity=".8"/>{price_line(700, 470, 500, 110)}'
+              f'<g transform="translate(70 96) scale(.88)">{mark(tile=False)}</g>'
+              f'<g transform="translate(560 270)"><path d="{word2}" fill="url(#gold)"/></g>'
+              f'<g transform="translate(566 326)"><path d="{line2a}" fill="{SLATE_L}"/></g><g transform="translate(566 366)"><path d="{line2b}" fill="{SLATE_L}"/></g>'
+              f'<g transform="translate(566 420)"><path d="{tag_s}" fill="{CREAM}" fill-opacity=".7"/></g>')
     (out / "social.svg").write_text(svg(1280, 640, social, NIGHT))
-
 
 if __name__ == "__main__":
     here = Path(__file__).parent

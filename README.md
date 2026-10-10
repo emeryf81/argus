@@ -16,15 +16,36 @@ through [HACS](https://hacs.xyz/)) and runs entirely on your own installation.
 
 ## How it works
 
-1. **Paste the address of a product page** (bol.com, Amazon, Fnac, …) — or just a name, or a barcode.
-2. ARGUS reads the name, brand, barcode (EAN/ISBN), model number, image and price from that page.
-3. It **looks the same product up at the other shops of its category** — electronics at Amazon, Krëfel, Fnac, Vanden Borre,
-   MediaMarkt…; books at Fnac, Standaard Boekhandel, bol…; toys & games; home, garden & DIY. Every candidate is
-   **verified** before it is linked: the barcode on the page must match, otherwise the title must cover the product's name
-   and model number, and it must not be an accessory (case, cable, spare part…) or a far-too-cheap lookalike.
-4. Every product is then checked once per cycle at every shop, spread over the day so the shops are not hammered.
-5. You get a **deal score**, a **price-history chart** (per shop and combined), a **ticker**, Home Assistant **sensors**
-   and **notifications** when something is worth your attention.
+1. **Type what you want to watch** — the address of a product page (bol.com, Amazon, Fnac…), a **name**
+   (`Sony WH-1000XM5`) or a **barcode** (`4548736132580`). ARGUS looks it up first: from a name it finds the barcode
+   (trusted when two pages agree), from a barcode the name, brand and picture. From then on everything is searched by
+   barcode, which is the same at every shop.
+2. ARGUS **suggests which of your shops to watch for this kind of product** — electronics at Amazon, Krëfel, Fnac,
+   Vanden Borre, MediaMarkt…; books at Fnac, Standaard Boekhandel, bol…; it never looks for headphones at a bookshop. You
+   tick or untick, and set a **maximum price** and/or a **deal alert** (“tell me when it is suddenly 10 / 20 / 30 / 40 /
+   50 % cheaper than usual”).
+3. It finds the product's page at each of those shops (see below). Every candidate is **verified** before it is linked:
+   the barcode on the page must match, otherwise the title must cover the product's name and model number, and it must
+   not be an accessory (case, cable, spare part…) or a far-too-cheap lookalike.
+4. Every product is checked once per cycle at every shop, spread over the day so the shops are not hammered. Comparison
+   sites are asked too (twice a day): their offers fill the gaps.
+5. Your **watch list** shows per product where it is cheapest and for how much, every shop coloured from **green (cheap)
+   to red (dear)**, your maximum price and your deal alert (light → bright green) — both editable right there. Plus a
+   **deal score**, a **price-history chart**, a **ticker**, Home Assistant **sensors** and **notifications**.
+
+### Prices from comparison services: ⓢ ⓟ ⓒ …
+
+Shops advertise in Google Shopping, Bing Shopping and on comparison sites through *Comparison Shopping Services* such as
+**Shoparize, Producthero, Channable**, Kelkoo, idealo… ARGUS reads those offers (sponsored ones included) and keeps, per
+shop, the price they show and the service that shows it:
+
+- **A shop ARGUS can't read itself** (blocked, captcha, JavaScript) still gets a price: the one the comparison service
+  shows, marked with the service's letter in a circle — **ⓢ** Shoparize, **ⓟ** Producthero, **ⓒ** Channable,
+  **ⓚ** Kelkoo, **ⓘ** idealo, **ⓖ** Google Shopping, **ⓜ** Bing Shopping… (prices from your own browser keep **ⓤ**).
+  The shop's own page always wins as soon as it can be read; a comparison price older than 3 days is not used.
+- **Shops you don't have yet** that sell the product (with a matching title or found by barcode) are **added to your list
+  by themselves**, with their price ("new shop found via Producthero: …"). You can switch them off under *Manage →
+  Settings → Shops*.
 
 ### Discovery methods
 
@@ -46,11 +67,11 @@ anything is fetched. A barcode confirmed by two shops is stored on the product, 
 
 ## Features
 
-- **Product tracking** by URL, name, barcode or CSV import (up to 200 products), with categories, priority (★–★★★),
-  reference price and target price.
+- **Product tracking** by URL, name, barcode or CSV import (up to 200 products), with categories, the shops to watch per
+  product, priority (★–★★★), reference price, maximum price and a deal alert (10–50 % below the usual price).
 - **Price history & deal score** — lowest ever, 90-day median, shop spread, target price; "price drop" and "lowest so far" badges.
-- **Notifications** with a rule editor: scopes (all / priority / categories / products) × triggers (target reached, lowest
-  price so far, discount, price below, price drop, deal score, new shop, back in stock, any change, daily digest, deal of
+- **Notifications** with a rule editor: scopes (all / priority / categories / products) × triggers (target reached, your deal alert,
+  lowest price so far, discount, price below, price drop, deal score, new shop, back in stock, any change, daily digest, deal of
   the day, job finished, problems) × targets (mobile app, notify service, e-mail, persistent notification, TTS, event),
   quiet hours and cooldowns. Every notification also fires the event `argus_notification`.
 - **Logbook & diagnosis** — everything the integration does, per shop and per product, with CSV export and a problem report.
