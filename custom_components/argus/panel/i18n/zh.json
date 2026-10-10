@@ -1260,5 +1260,11 @@
 "found through a price-comparison site; the shop's page is checked at the next price check": "通过比价网站找到；商店页面会在下次价格检查时核对",
 "{field}: wrong type": "{field}：类型错误",
 "{pct}% cheaper than usual (your alert: {alert}%)": "比平时便宜 {pct}%（您的提醒：{alert}%）",
-"Your deal alert on the product (10–50% cheaper)": "产品的优惠提醒（便宜 10–50%）"
+"Your deal alert on the product (10–50% cheaper)": "产品的优惠提醒（便宜 10–50%）",
+"Country": "国家",
+"Belgium": "比利时",
+"Netherlands": "荷兰",
+"Shops and comparison sites use the addresses of this country (bol.com/be or /nl, kieskeurig.be or .nl, …); shops that only exist in the other country are left out.": "商店和比价网站使用该国家的地址（bol.com/be 或 /nl，kieskeurig.be 或 .nl……）；仅存在于另一国家的商店会被略过。",
+"Unknown country.": "未知国家。",
+"price from a price-comparison site; the shop's own page is not known yet": "来自比价网站的价格；尚不知道商店自己的页面"
 }

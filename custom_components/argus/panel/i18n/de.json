@@ -1260,5 +1260,11 @@
 "found through a price-comparison site; the shop's page is checked at the next price check": "über einen Preisvergleich gefunden; die Seite des Shops wird bei der nächsten Preisprüfung geprüft",
 "{field}: wrong type": "{field}: falscher Typ",
 "{pct}% cheaper than usual (your alert: {alert}%)": "{pct} % günstiger als üblich (dein Alarm: {alert} %)",
-"Your deal alert on the product (10–50% cheaper)": "Dein Deal-Alarm für das Produkt (10–50 % günstiger)"
+"Your deal alert on the product (10–50% cheaper)": "Dein Deal-Alarm für das Produkt (10–50 % günstiger)",
+"Country": "Land",
+"Belgium": "Belgien",
+"Netherlands": "Niederlande",
+"Shops and comparison sites use the addresses of this country (bol.com/be or /nl, kieskeurig.be or .nl, …); shops that only exist in the other country are left out.": "Shops und Preisvergleiche nutzen die Adressen dieses Landes (bol.com/be oder /nl, kieskeurig.be oder .nl, …); Shops, die es nur im anderen Land gibt, entfallen.",
+"Unknown country.": "Unbekanntes Land.",
+"price from a price-comparison site; the shop's own page is not known yet": "Preis aus einem Preisvergleich; die eigene Seite des Shops ist noch nicht bekannt"
 }

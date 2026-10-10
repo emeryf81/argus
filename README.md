@@ -56,11 +56,16 @@ finder only ever gives a suggestion.
 | # | Method | What it does |
 | --- | --- | --- |
 | 1 | Shop search by barcode | `https://www.mediamarkt.be/nl/search.html?query=4548736132580`: the shop's own search for the EAN/ISBN; a redirect straight to the product page counts too |
-| 2 | Price-comparison sites (*aggregators*) | one search per product (barcode, else name) at Google Shopping, Bing Shopping, Kelkoo…: **all** links to your shops are harvested, sponsored ads included (their redirect addresses — `adurl=`, `url=`, Bing's base64 `u=` — are unpacked to the shop's address) |
+| 2 | Price-comparison sites (*aggregators*) | one search per product (barcode, else name) at Google Shopping, Bing Shopping, Kelkoo, **Tweakers Pricewatch, Kieskeurig, Beslist** (`.be/nl` or `.nl`, by your country)…: **all** links to your shops are harvested, sponsored ads included (their redirect addresses — `adurl=`, `url=`, Bing's base64 `u=` — are unpacked to the shop's address) |
 | 3 | Web search (*websearch*) | searches `Sony WH-1000XM5 fnac` at DuckDuckGo / Bing / Google and takes the first results on the shop's domain, e.g. `https://www.nl.fnac.be/Sony-WH1000XM5B-…/a16864769` |
 | 4 | Shop search by name | the shop's own search by brand + name + model, ranked by title similarity |
 | 5 | Browser search (userscript) | your own browser searches shops that block the server or render results with JavaScript |
 | 6 | Manual | paste a link per shop in the product window; a manual link or price always wins |
+
+Tweakers, Kieskeurig and Beslist send you to the shop through a link on their own site (a *click-out*): ARGUS opens the
+product's page there (the one whose title names the product and its model number, never an accessory) and recognises
+every shop by its **name or logo next to the price**. That gives a price per shop (marked **ⓣ** Tweakers, **ⓠ**
+Kieskeurig, **ⓑ** Beslist) even before ARGUS knows the shop's own page; the click-outs themselves are never opened.
 
 Links to accessories (case, cable, spare part…), search pages, the shop's home page and other domains are dropped before
 anything is fetched. A barcode confirmed by two shops is stored on the product, which makes later searches surer.
@@ -104,6 +109,9 @@ decision and responsibility.
   `categories` and a `search` template containing `{query}` and/or `{ean}`; optionally `finders` (`kind`: `websearch` or
   `aggregator`, with `domain` and `search`). Finders are websites too: they fall under the same terms and can be switched
   off in *Manage → Settings → Finders*.
+- **Country** (*Manage → Settings*, Belgium or the Netherlands): a shop or finder can differ per country — `{country}` in
+  an address (`https://www.bol.com/{country}/nl/s/?searchtext={query}`), one value per country
+  (`"domain": {"be": "kieskeurig.be", "nl": "kieskeurig.nl"}`) or `"countries": ["be"]` for a shop that only exists in one.
 - In the panel: *Manage → Shops & jobs → Import shop settings*, read the terms, tick the box.
   You can withdraw at any time under *Manage → Legal*; from then on no shop is contacted.
 - The search URL of every shop can be changed in *Manage → Settings*: search the shop for the word `ARGUSTEST`, paste the

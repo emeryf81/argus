@@ -2042,7 +2042,9 @@ class ArgusPanel extends HTMLElement {
       <td style="min-width:300px"><div style="display:flex;gap:4px"><input class="s_search" value="${esc(x.search || "")}" placeholder="${esc(x.default_search || "https://…{query}")}" style="flex:1;min-width:220px;font-size:12px">${x.default_search ? `<button class="btn ghost sm s_reset" title="${t("Back to the default: {url}", { url: esc(x.default_search) })}" ${x.search === x.default_search ? "hidden" : ""}>↺</button>` : ""}</div><div class="s_prev muted" style="font-size:11px;margin-top:3px">${this.searchPreview(x.search || x.default_search)}</div></td>
       <td>${x.builtin ? "" : `<button class="btn danger sm s_del" title="${t("Remove shop")}">🗑</button>`}</td></tr>`).join("");
     const langs = st.languages || {}, mode = d.mode, dev = st.dev || {};
-    return `${this.colorsPanel()}<div class="panel"><h3>🌐 ${t("Language")}</h3><div class="form" style="max-width:520px"><label>${t("Language of the panel, notifications and userscript")}<select id="o_lang"><option value="auto" ${st.language === "auto" ? "selected" : ""}>${t("Automatic (Home Assistant language)")}</option>${Object.entries(langs).map(([k, l]) => `<option value="${k}" ${st.language === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label></div></div>
+    return `${this.colorsPanel()}<div class="panel"><h3>🌐 ${t("Language")}</h3><div class="form" style="max-width:520px"><label>${t("Language of the panel, notifications and userscript")}<select id="o_lang"><option value="auto" ${st.language === "auto" ? "selected" : ""}>${t("Automatic (Home Assistant language)")}</option>${Object.entries(langs).map(([k, l]) => `<option value="${k}" ${st.language === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
+        <label>${t("Country")}<select id="o_country">${[["be", "🇧🇪 " + t("Belgium")], ["nl", "🇳🇱 " + t("Netherlands")]].map(([k, l]) => `<option value="${k}" ${(st.country || "be") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+          <span class="hint muted">${t("Shops and comparison sites use the addresses of this country (bol.com/be or /nl, kieskeurig.be or .nl, …); shops that only exist in the other country are left out.")}</span></label></div></div>
       <div class="panel"><h3>🔔 ${t("Notifications")}</h3><p class="muted" style="font-size:13px">${t("What counts as a deal is set under Prices → Deal settings.")} <a data-goto="prices/dset" style="cursor:pointer">🏷️ ${t("Deal settings")} →</a></p>
         <div class="form"><label>${t("Notifications")}<a class="btn ghost sm" data-goto="manage/notify" style="cursor:pointer;margin-top:4px;align-self:flex-start">🔔 ${t("Go to Notifications")}</a><input id="o_notify" type="hidden" value="${esc(st.notify_service)}"></label>
         <label>${t("Daily digest at")}<input id="o_digest" type="time" value="${esc(st.digest_time)}"></label></div></div>
@@ -2360,7 +2362,7 @@ class ArgusPanel extends HTMLElement {
         ...(d.mode === "times" ? { refresh_times: $("o_times").value } : {}), use_impersonation: $("o_imp").checked,
         retailers: d.shops.filter((x) => x.enabled).map((x) => x.id), no_autopause: d.shops.filter((x) => !x.autopause).map((x) => x.id),
         custom_shops: d.custom, shop_search: Object.fromEntries(d.shops.filter((x) => x.builtin).map((x) => [x.id, x.search === x.default_search ? "" : this.toTemplate(x.search || "")])),
-        language: $("o_lang").value,
+        language: $("o_lang").value, country: $("o_country").value,
       };
       // a number field some phone keyboards leave empty: keep the saved number instead of 0
       const tkn = (k) => { const v = parseInt(String($("o_tkn_" + k).value).replace(/\D/g, ""), 10); return Number.isFinite(v) ? Math.max(0, Math.min(50, v)) : ((st.ticker || {})["max_" + k] ?? 3); };

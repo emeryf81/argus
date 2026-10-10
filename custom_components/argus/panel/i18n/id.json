@@ -1260,5 +1260,11 @@
 "found through a price-comparison site; the shop's page is checked at the next price check": "ditemukan lewat situs perbandingan; halaman toko diperiksa pada pemeriksaan harga berikutnya",
 "{field}: wrong type": "{field}: tipe salah",
 "{pct}% cheaper than usual (your alert: {alert}%)": "{pct}% lebih murah dari biasanya (peringatanmu: {alert}%)",
-"Your deal alert on the product (10–50% cheaper)": "Peringatan penawaran produkmu (10–50% lebih murah)"
+"Your deal alert on the product (10–50% cheaper)": "Peringatan penawaran produkmu (10–50% lebih murah)",
+"Country": "Negara",
+"Belgium": "Belgia",
+"Netherlands": "Belanda",
+"Shops and comparison sites use the addresses of this country (bol.com/be or /nl, kieskeurig.be or .nl, …); shops that only exist in the other country are left out.": "Toko dan situs perbandingan memakai alamat negara ini (bol.com/be atau /nl, kieskeurig.be atau .nl, …); toko yang hanya ada di negara lain dilewati.",
+"Unknown country.": "Negara tidak dikenal.",
+"price from a price-comparison site; the shop's own page is not known yet": "harga dari situs perbandingan; halaman toko sendiri belum diketahui"
 }

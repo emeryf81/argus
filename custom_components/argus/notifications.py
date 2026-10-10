@@ -241,7 +241,7 @@ class Notifier:
         price, rid, best = status.get("best_price"), status.get("best_retailer"), status.get("best_url")
         offers = self.store["offers"].get(pid, {})
         if shops and rid not in shops:              # a rule for certain shops: the cheapest of those shops
-            priced = sorted((o["last_price"], r, o["url"]) for r, o in offers.items()
+            priced = sorted((o["last_price"], r, o.get("url")) for r, o in offers.items()
                             if r in shops and o.get("available") and o.get("last_price") and o.get("url"))
             if not priced:
                 return price, rid, best

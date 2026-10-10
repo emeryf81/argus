@@ -551,3 +551,45 @@ def test_deal_alert_fires_when_the_product_is_suddenly_cheaper():
     assert [t for t, _ in product_triggers(rule, before, after)] == ["my_alert"]
     assert product_triggers(rule, before, {**after, "discount_avg": 15.0}) == []
     assert product_triggers(rule, after, after) == []                             # only once, when it crosses the line
+
+
+def test_country_decides_addresses_and_shops():
+    from custom_components.argus import shops
+    from tests.conftest import EXAMPLE
+
+    nl = shops.validate_settings(EXAMPLE, "nl")
+    be = shops.validate_settings(EXAMPLE, "be")
+    by = lambda data, part: {x["id"]: x for x in data[part]}  # noqa: E731
+    assert by(be, "shops")["bol"]["search"] == "https://www.bol.com/be/nl/s/?searchtext={query}"
+    assert by(nl, "shops")["bol"]["search"] == "https://www.bol.com/nl/nl/s/?searchtext={query}"
+    assert by(be, "finders")["kieskeurig"]["search"].startswith("https://www.kieskeurig.be/nl/")
+    assert by(nl, "finders")["kieskeurig"]["domain"] == "kieskeurig.nl" and by(nl, "finders")["beslist"]["domain"] == "beslist.nl"
+    assert "krefel" in by(be, "shops") and "krefel" not in by(nl, "shops")          # a Belgian shop only in Belgium
+    assert by(nl, "shops")["coolblue_be"]["domain"] == "coolblue.nl"
+    kept = shops.validate_settings(EXAMPLE)                                           # stored as written, for both countries
+    assert isinstance(next(s for s in kept["shops"] if s["id"] == "coolblue_be")["domain"], dict)
+
+
+TWEAKERS_SEARCH = ('<html><body><a href="/pricewatch/1858494/sony-wh-1000xm5-zwart.html">Sony WH-1000XM5 Zwart</a>'
+                   '<a href="/pricewatch/1858495/sony-wh-1000xm5-oorkussens.html">Oorkussens voor Sony WH-1000XM5</a></body></html>')
+TWEAKERS_PAGE = ('<html><body><h1>Sony WH-1000XM5 Zwart</h1><table>'
+                 '<tr><td><img src="/logo/1.png" alt="Vanden Borre"></td><td>€ 284,00</td><td><a href="https://tweakers.net/clickout/1/">Naar winkel</a></td></tr>'
+                 '<tr><td><img src="/logo/2.png" alt="Krëfel"></td><td>€ 295,00</td><td><a href="https://tweakers.net/clickout/2/">Naar winkel</a></td></tr>'
+                 '<tr><td><img src="/logo/3.png" alt="Onbekende Winkel"></td><td>€ 199,00</td><td><a href="https://tweakers.net/clickout/3/">Naar winkel</a></td></tr>'
+                 '</table></body></html>')
+
+
+async def test_tweakers_style_clickouts_give_prices_per_shop_name(hass: HomeAssistant, entry, world):
+    """Tweakers, Kieskeurig and Beslist link to the shop through their own site: the product's page there is opened and
+    each shop is recognised by its name or logo next to the price."""
+    world.pages["tweakers.net/pricewatch/zoeken/"] = (200, TWEAKERS_SEARCH)
+    world.pages["tweakers.net/pricewatch/1858494/"] = (200, TWEAKERS_PAGE)
+    coord = await setup(hass, entry)
+    pid = (await coord.add_product("https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/", discover=False,
+                                   shops=["bol", "krefel", "vandenborre"]))["id"]
+    await coord.finder_round(pid, force=True)
+    offers = coord.store["offers"][pid]
+    assert offers["vandenborre"]["last_price"] == 284.0 and offers["vandenborre"]["last_via"] == "css:tweakers"
+    assert offers["vandenborre"].get("url") is None                                  # price known, page not yet
+    assert offers["krefel"]["last_price"] == 295.0
+    assert not [h for h in world.hits if "oorkussens" in h or "clickout" in h]       # accessories and click-outs never opened

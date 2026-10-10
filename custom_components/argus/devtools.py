@@ -183,7 +183,7 @@ def health(coord: Any, repair: bool = False) -> list[dict[str, Any]]:
     for n, per in offers.items():
         for r, o in per.items():
             if o.get("url"):
-                urls.setdefault(o["url"].split("?")[0].rstrip("/").lower(), []).append(n)
+                urls.setdefault((o.get("url") or "").split("?")[0].rstrip("/").lower(), []).append(n)
     add("same_link_for_several_products", [f"{u} ({', '.join(sorted(set(ns)))})" for u, ns in urls.items() if len(set(ns)) > 1], None)
     num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)  # noqa: E731 - stored data is not validated
     add("suspicious_reference_prices", [f"{n}: {p.get('ref_price')}" for n, p in products.items()

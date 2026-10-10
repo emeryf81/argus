@@ -40,7 +40,7 @@ FINDERS: dict[str, dict[str, Any]] = {}            # finder id -> {id, name, kin
 ENABLED_FINDERS: set[str] = set()
 AUTO_SHOPS: dict[str, dict[str, Any]] = {}          # shops found through comparison sites (kept in the store)
 MAX_AUTO_SHOPS = 40
-STATE = {"profile": False, "legal": False}
+STATE: dict[str, Any] = {"profile": False, "legal": False, "country": "be"}
 
 
 def shop_id(name: str) -> str:
@@ -91,8 +91,70 @@ def validate_custom_shop(shop: dict[str, Any]) -> dict[str, Any]:
             "categories": _categories(shop.get("categories"), sid)}
 
 
-def validate_settings(data: Any) -> dict[str, Any]:
-    """A shop settings file, checked and cleaned. Raises LocalizedError with what is wrong."""
+COUNTRIES: dict[str, str] = {"be": "Belgium", "nl": "Netherlands"}
+DEFAULT_COUNTRY = "be"
+CONF_COUNTRY = "country"
+COUNTRY_KEYS = ("domain", "search", "home")
+
+
+def localize(data: Any, country: str) -> Any:
+    """A settings file for one country. A shop or finder may differ per country (the country you choose under Settings):
+      "search": "https://www.bol.com/{country}/nl/s/?searchtext={query}"     {country} becomes be / nl
+      "domain": {"be": "beslist.be", "nl": "beslist.nl"}                     one value per country
+      "countries": ["be"]                                                    only used in these countries"""
+    if not isinstance(data, dict):
+        return data
+    out = dict(data)
+    for part in ("shops", "finders"):
+        items = data.get(part)
+        if not isinstance(items, list):
+            continue
+        kept = []
+        for raw in items:
+            if not isinstance(raw, dict):
+                kept.append(raw)
+                continue
+            only = raw.get("countries")
+            if isinstance(only, list) and only and country not in only:
+                continue
+            item = {k: v for k, v in raw.items() if k != "countries"}
+            for key in COUNTRY_KEYS:
+                v = item.get(key)
+                if isinstance(v, dict):
+                    v = v.get(country)
+                    if v is None:
+                        item.pop(key)
+                        continue
+                if isinstance(v, str):
+                    item[key] = v.replace("{country}", country)
+            if item.get("domain"):
+                kept.append(item)
+        out[part] = kept
+    return out
+
+
+def validate_settings(data: Any, country: str | None = None) -> dict[str, Any]:
+    """A shop settings file, checked. With a country: cleaned and resolved for that country (what is used). Without:
+    every country is checked and the file is kept as written (with its per-country values) for storing."""
+    if country is not None:
+        return _validate_plain(localize(data, country))
+    if not isinstance(data, dict) or data.get("format") != SETTINGS_FORMAT:
+        raise LocalizedError("This is not a shop settings file for this integration.")
+    usable = 0
+    for c in COUNTRIES:
+        try:
+            usable += len(_validate_plain(localize(data, c))["shops"])
+        except LocalizedError as err:
+            if err.template != "The shop settings file contains no shops.":
+                raise
+    if not usable:
+        raise LocalizedError("The shop settings file contains no shops.")
+    keep = ("format", "version", "notice", "shops", "finders")
+    return {k: data[k] for k in keep if k in data}
+
+
+def _validate_plain(data: Any) -> dict[str, Any]:
+    """A shop settings file for one country, checked and cleaned. Raises LocalizedError with what is wrong."""
     if not isinstance(data, dict) or data.get("format") != SETTINGS_FORMAT:
         raise LocalizedError("This is not a shop settings file for this integration.")
     if data.get("version") != SETTINGS_VERSION:
@@ -144,7 +206,7 @@ def validate_settings(data: Any) -> dict[str, Any]:
         fseen.add(fid)
         mark = str(raw.get("mark") or "").strip().lower()
         finders.append({"id": fid, "name": name, "kind": raw["kind"], "domain": domain, "search": search,
-                        **({"mark": mark} if re.fullmatch(r"[a-z]", mark) else {})})
+                        **({"mark": mark} if re.fullmatch(r"[a-z]", mark) else {}), **({"follow": True} if raw.get("follow") is True else {})})
     if len(finders) > MAX_FINDERS:
         raise LocalizedError("At most {n} finders in one settings file.", n=MAX_FINDERS)
     if not shops:
@@ -180,8 +242,10 @@ def reader_of(rid: str) -> str:
 def apply_shop_options(options: dict[str, Any]) -> None:
     """Rebuild the registry from the options (imported settings + custom shops + search overrides)."""
     profile = options.get(CONF_SHOP_PROFILE)
+    country = options.get(CONF_COUNTRY) if options.get(CONF_COUNTRY) in COUNTRIES else DEFAULT_COUNTRY
+    STATE["country"] = country
     try:
-        profile = validate_settings(profile) if profile else None
+        profile = validate_settings(profile, country) if profile else None
     except (ValueError, TypeError, AttributeError):
         profile = None
     STATE["profile"], STATE["legal"] = profile is not None, legal_ok(options)
@@ -293,6 +357,13 @@ def shops_for_category(category: str | None, enabled: list[str] | None = None) -
     if not category or category == "other":
         return ids
     return [r for r in ids if not CATEGORY_OF.get(r) or category in CATEGORY_OF[r]]
+
+
+def shop_names() -> list[tuple[str, str]]:
+    """(name as written on other sites, shop id), longest first: to recognise a shop by its name or logo."""
+    names = {(label.lower(), rid) for rid, (label, _) in RETAILERS.items() if len(label) >= 3}
+    names |= {(a, rid) for a, rid in ALIASES if rid in RETAILERS}
+    return sorted(names, key=lambda x: -len(x[0]))
 
 
 def finder_key(fid: str) -> str:

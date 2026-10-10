@@ -15,6 +15,9 @@
         "amazon belgië",
         "amazon belgie",
         "amazon"
+      ],
+      "countries": [
+        "be"
       ]
     },
     {
@@ -35,7 +38,7 @@
       "domain": "bol.com",
       "reader": "retail",
       "categories": [],
-      "search": "https://www.bol.com/be/nl/s/?searchtext={query}",
+      "search": "https://www.bol.com/{country}/nl/s/?searchtext={query}",
       "aliases": [
         "bol.com",
         "bol"
@@ -56,6 +59,9 @@
         "krefel",
         "krëfel",
         "krefel.be"
+      ],
+      "countries": [
+        "be"
       ]
     },
     {
@@ -72,18 +78,27 @@
         "vanden borre",
         "vandenborre",
         "vandenborre.be"
+      ],
+      "countries": [
+        "be"
       ]
     },
     {
       "id": "mediamarkt_be",
       "name": "MediaMarkt",
-      "domain": "mediamarkt.be",
+      "domain": {
+        "be": "mediamarkt.be",
+        "nl": "mediamarkt.nl"
+      },
       "reader": "generic",
       "categories": [
         "electronics",
         "toys_games"
       ],
-      "search": "https://www.mediamarkt.be/nl/search.html?query={query}",
+      "search": {
+        "be": "https://www.mediamarkt.be/nl/search.html?query={query}",
+        "nl": "https://www.mediamarkt.nl/nl/search.html?query={query}"
+      },
       "aliases": [
         "mediamarkt",
         "media markt",
@@ -93,13 +108,19 @@
     {
       "id": "coolblue_be",
       "name": "Coolblue",
-      "domain": "coolblue.be",
+      "domain": {
+        "be": "coolblue.be",
+        "nl": "coolblue.nl"
+      },
       "reader": "generic",
       "categories": [
         "electronics",
         "home_garden_diy"
       ],
-      "search": "https://www.coolblue.be/nl/zoeken?query={query}",
+      "search": {
+        "be": "https://www.coolblue.be/nl/zoeken?query={query}",
+        "nl": "https://www.coolblue.nl/zoeken?query={query}"
+      },
       "aliases": [
         "coolblue",
         "coolblue.be"
@@ -119,6 +140,9 @@
       "aliases": [
         "fnac",
         "fnac.be"
+      ],
+      "countries": [
+        "be"
       ]
     },
     {
@@ -135,6 +159,9 @@
         "standaard boekhandel",
         "standaardboekhandel",
         "standaardboekhandel.be"
+      ],
+      "countries": [
+        "be"
       ]
     },
     {
@@ -149,6 +176,9 @@
       "aliases": [
         "toychamp",
         "toychamp.be"
+      ],
+      "countries": [
+        "be"
       ]
     },
     {
@@ -163,6 +193,9 @@
       "aliases": [
         "dreamland",
         "dreamland.be"
+      ],
+      "countries": [
+        "be"
       ]
     },
     {
@@ -177,17 +210,26 @@
       "aliases": [
         "brico",
         "brico.be"
+      ],
+      "countries": [
+        "be"
       ]
     },
     {
       "id": "gamma_be",
       "name": "Gamma",
-      "domain": "gamma.be",
+      "domain": {
+        "be": "gamma.be",
+        "nl": "gamma.nl"
+      },
       "reader": "generic",
       "categories": [
         "home_garden_diy"
       ],
-      "search": "https://www.gamma.be/nl/zoeken?text={query}",
+      "search": {
+        "be": "https://www.gamma.be/nl/zoeken?text={query}",
+        "nl": "https://www.gamma.nl/zoeken?text={query}"
+      },
       "aliases": [
         "gamma",
         "gamma.be"
@@ -205,6 +247,9 @@
       "aliases": [
         "hubo",
         "hubo.be"
+      ],
+      "countries": [
+        "be"
       ]
     },
     {
@@ -215,7 +260,7 @@
       "categories": [
         "home_garden_diy"
       ],
-      "search": "https://www.ikea.com/be/nl/search/?q={query}",
+      "search": "https://www.ikea.com/{country}/nl/search/?q={query}",
       "aliases": [
         "ikea",
         "ikea.com"
@@ -244,7 +289,7 @@
       "name": "Google",
       "kind": "websearch",
       "domain": "google.com",
-      "search": "https://www.google.com/search?q={query}&hl=nl&gl=be",
+      "search": "https://www.google.com/search?q={query}&hl=nl&gl={country}",
       "mark": "g"
     },
     {
@@ -252,7 +297,7 @@
       "name": "Google Shopping",
       "kind": "aggregator",
       "domain": "google.com",
-      "search": "https://www.google.com/search?tbm=shop&q={query}&hl=nl&gl=be",
+      "search": "https://www.google.com/search?tbm=shop&q={query}&hl=nl&gl={country}",
       "mark": "g"
     },
     {
@@ -267,9 +312,54 @@
       "id": "kelkoo",
       "name": "Kelkoo",
       "kind": "aggregator",
-      "domain": "kelkoo.be",
-      "search": "https://www.kelkoo.be/search?query={query}",
+      "domain": {
+        "be": "kelkoo.be",
+        "nl": "kelkoo.nl"
+      },
+      "search": {
+        "be": "https://www.kelkoo.be/search?query={query}",
+        "nl": "https://www.kelkoo.nl/search?query={query}"
+      },
       "mark": "k"
+    },
+    {
+      "id": "tweakers",
+      "name": "Tweakers Pricewatch",
+      "kind": "aggregator",
+      "follow": true,
+      "mark": "t",
+      "domain": "tweakers.net",
+      "search": "https://tweakers.net/pricewatch/zoeken/?keyword={query}"
+    },
+    {
+      "id": "kieskeurig",
+      "name": "Kieskeurig",
+      "kind": "aggregator",
+      "follow": true,
+      "mark": "q",
+      "domain": {
+        "be": "kieskeurig.be",
+        "nl": "kieskeurig.nl"
+      },
+      "search": {
+        "be": "https://www.kieskeurig.be/nl/search?q={query}",
+        "nl": "https://www.kieskeurig.nl/search?q={query}"
+      }
+    },
+    {
+      "id": "beslist",
+      "name": "Beslist",
+      "kind": "aggregator",
+      "follow": true,
+      "mark": "b",
+      "domain": {
+        "be": "beslist.be",
+        "nl": "beslist.nl"
+      },
+      "search": {
+        "be": "https://www.beslist.be/nl/products/r/{query}/",
+        "nl": "https://www.beslist.nl/products/r/{query}/"
+      }
     }
   ]
 }

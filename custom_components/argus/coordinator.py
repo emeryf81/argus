@@ -707,8 +707,8 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """A link found by searching (not chosen by hand): the same page keeps its history, a manual
         price always stays; a hand-set confirmation or an earlier link verdict no longer applies."""
         old = offers.get(retailer) or {}
-        if old.get("url") and url_key(retailer, old["url"]) == url_key(retailer, url):
-            o = old
+        if (old.get("url") and url_key(retailer, old["url"]) == url_key(retailer, url)) or (old and not old.get("url")):
+            o = old                                   # same page, or a shop known only by its comparison-site price
             o["url"] = url
         else:
             o = offers[retailer] = {"url": url, "history": [], "found": time.time(),
@@ -1232,7 +1232,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def settings_get(self) -> dict[str, Any]:
         """Return panel settings and shop state."""
-        from .shops import CATEGORY_OF, ENABLED_FINDERS, FINDERS, finder_key
+        from .shops import CATEGORY_OF, COUNTRIES as COUNTRIES_, ENABLED_FINDERS, FINDERS, finder_key
 
         o = {**self.entry.data, **self.entry.options}
         shops = []
@@ -1254,6 +1254,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "digest_time": str(o.get(CONF_DIGEST_TIME, DEFAULT_DIGEST_TIME))[:5], "use_impersonation": bool(o.get(CONF_IMPERSONATE, True)),
             "notify_service": o.get(CONF_NOTIFY, "") or "",
             "shops": shops, "transport": self.fetcher.transport,
+            "country": o.get("country") or "be", "countries": dict(COUNTRIES_),
             "finders": [{**f, "enabled": f["id"] in ENABLED_FINDERS, "paused_hours": round(self.fetcher.cooldown_left(finder_key(f["id"])) / 3600, 2)}
                         for f in FINDERS.values()],
             "refresh_mode": self.refresh_mode, "spread_hours": self.spread_hours, "watch_cycle_min": self.watch_cycle_minutes,
@@ -1401,6 +1402,12 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             active = list(opts.get(CONF_RETAILERS, self.opt(self.entry, CONF_RETAILERS, profile_ids())))
             opts[CONF_RETAILERS] = [r for r in active if r in valid_ids] + \
                 [s["id"] for s in opts[CONF_CUSTOM_SHOPS] if s["id"] not in before and s["id"] not in active]
+        if "country" in fields:
+            from .shops import COUNTRIES
+
+            if fields["country"] not in COUNTRIES:
+                raise LocalizedError("Unknown country.")
+            opts["country"] = fields["country"]
         if "finders" in fields:
             from .shops import FINDERS
             opts["finders"] = [f for f in fields["finders"] if f in FINDERS]
@@ -1805,8 +1812,16 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             cands = [i for i in items if good(i)]
             if not cands:
                 continue
-            item = cands[0]
+            item = next((i for i in cands if i["url"]), cands[0])
             o = offers.get(rid)
+            if item["url"] is None:                        # a click-out: the shop's price by its name, no address
+                o = offers.setdefault(rid, {"history": [], "found": now, "found_via": "agg", "link_status": "unknown",
+                                            "link_reason": T("price from a price-comparison site; the shop's own page is not known yet")})
+                o["finder_price"] = {"price": item["price"], "via": item.get("css") or item.get("finder"), "ts": now, "url": None}
+                if (not o.get("url") or not o.get("available")) and not o.get("manual_price"):
+                    record_price(o, item["price"])
+                    o["last_via"] = "css:" + o["finder_price"]["via"]
+                continue
             if not o or not o.get("url"):
                 if url_key(rid, item["url"]) in rejected:
                     continue
@@ -1820,6 +1835,9 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             o["finder_price"] = {"price": item["price"], "via": item.get("css") or item.get("finder"), "ts": now, "url": item["url"]}
             if not o.get("available") and not o.get("manual_price"):
                 record_price(o, item["price"])
+                o["last_via"] = "css:" + o["finder_price"]["via"]
+            elif (o.get("last_via") or "").startswith("css:") and not o.get("manual_price"):
+                record_price(o, item["price"])            # still read through the comparison site: follow its price
                 o["last_via"] = "css:" + o["finder_price"]["via"]
         self.push_update()
         return new_links

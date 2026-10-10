@@ -27,6 +27,25 @@ KINDS = ("websearch", "aggregator")
 URL_RE = re.compile(r"https?(?::|%3[Aa])(?://|%2[Ff]%2[Ff])[^\s\"'<>\\]+")
 HREF_RE = re.compile(r"<a\b[^>]*?\bhref\s*=\s*([\"'])(.*?)\1[^>]*>(.*?)</a>", re.I | re.S)
 TAG_RE = re.compile(r"<[^>]+>")
+ALT_RE = re.compile(r"<img\b[^>]*?\b(?:alt|title)\s*=\s*([\"'])(.*?)\1[^>]*>", re.I | re.S)   # shop logos carry the shop's name
+CTA_RE = re.compile(r"^(?:|naar (?:de )?winkel|naar shop|bekijk|bekijken|bekijk aanbieding|ga naar.*|bezoek.*|koop.*|kopen|shop|"
+                    r"to (?:the )?shop|visit.*|buy.*|vers la boutique|voir l'offre|zum shop|aanbieding|deal|€.*|\d.*)$", re.I)
+
+
+def _text(html: str) -> str:
+    """The visible text of a piece of HTML (pictures count with their alt text: shop logos)."""
+    return " ".join(htmllib.unescape(TAG_RE.sub(" ", ALT_RE.sub(lambda m: f" {m.group(2)} ", html))).split())
+
+
+def _named(text: str, names: list[tuple[str, str]], last: bool = False) -> str | None:
+    """The shop (id) whose name appears in a text: the first one, or the last one before a link."""
+    low = f" {text.lower()} "
+    best: tuple[int, str] | None = None
+    for alias, rid in names:
+        for m in re.finditer(r"(?<![a-z0-9])" + re.escape(alias) + r"(?![a-z0-9])", low):
+            if best is None or (m.start() > best[0] if last else m.start() < best[0]):
+                best = (m.start(), rid)
+    return best[1] if best else None
 
 
 def _flatten(raw: str) -> str:
@@ -72,7 +91,7 @@ def _host_ok(url: str, domain: str) -> bool:
 # "Door Producthero"…): the price is then shown with that service's circled letter, so you see where it came from.
 CSS_SERVICES: dict[str, tuple[str, str]] = {
     "shoparize": ("Shoparize", "s"), "producthero": ("Producthero", "p"), "channable": ("Channable", "c"),
-    "kelkoo": ("Kelkoo", "k"), "idealo": ("idealo", "i"), "pricerunner": ("PriceRunner", "r"), "beslist": ("Beslist", "b"),
+    "kelkoo": ("Kelkoo", "k"), "kieskeurig": ("Kieskeurig", "q"), "idealo": ("idealo", "i"), "pricerunner": ("PriceRunner", "r"), "beslist": ("Beslist", "b"),
     "tweakers": ("Tweakers", "t"), "google": ("Google Shopping", "g"), "bing": ("Bing Shopping", "m"),
     "smarter ecommerce": ("smec", "e"), "adtraction": ("Adtraction", "a"), "vergelijk": ("Vergelijk", "v"),
 }
@@ -135,7 +154,7 @@ def _ld_offers(page: str) -> list[dict[str, Any]]:
 
 def offers(page: str, domains: dict[str, str], product: dict[str, Any] | None = None,
            skip: set[str] | frozenset[str] = frozenset(), url_key: Any = None, own_domain: str = "",
-           ) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+           names: list[tuple[str, str]] | None = None) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
     """Offers in a finder's result page.
 
     Returns ({shop id: [{"url", "title", "score", "price", "css"}]} best first, [offers at shops that are not in your
@@ -143,7 +162,11 @@ def offers(page: str, domains: dict[str, str], product: dict[str, Any] | None = 
     Every address on a shop's domain counts, organic or sponsored (ads hide the shop's address in a redirect
     parameter). Search pages, home pages and pictures are dropped, and so is a link whose text or address names an
     accessory; the rest is ranked by how well its text covers the product's name. The price and the comparison service
-    next to a link come from the text around it (or from the page's structured data)."""
+    next to a link come from the text around it (or from the page's structured data).
+
+    Comparison sites such as Tweakers, Kieskeurig and Beslist send you to the shop through a link on their own site
+    (a click-out): there the shop is recognised by its name or logo next to the price (names: [(name, shop id)]); such
+    an offer has a price but no address of the shop ("url": None)."""
     raw_page = page
     text = _flatten(page)
     plain_parts: list[str] = []
@@ -152,17 +175,17 @@ def offers(page: str, domains: dict[str, str], product: dict[str, Any] | None = 
     last = 0
     plain_len = 0
     for m in HREF_RE.finditer(text):
-        before = " " + " ".join(TAG_RE.sub(" ", text[last:m.start()]).split()) + " "
+        before = " " + _text(text[last:m.start()]) + " "
         plain_parts.append(before)
         plain_len += len(before)
-        label = " ".join(htmllib.unescape(TAG_RE.sub(" ", m.group(3))).split())[:200]
+        label = _text(m.group(3))[:200]
         for u in _urls_in(m.group(2)):
             hits.append((u, label, plain_len))
         spans.append((plain_len, plain_len + len(label)))
         plain_parts.append(label)
         plain_len += len(label)
         last = m.end()
-    plain_parts.append(" " + " ".join(TAG_RE.sub(" ", text[last:]).split()))
+    plain_parts.append(" " + _text(text[last:]))
     plain = "".join(plain_parts)
     seen_urls = {h[0] for h in hits}
     for u in _urls_in(text):                      # addresses in scripts / data attributes (no link text)
@@ -173,6 +196,30 @@ def offers(page: str, domains: dict[str, str], product: dict[str, Any] | None = 
     name, brand = (product or {}).get("name"), (product or {}).get("brand")
     found: dict[str, dict[str, dict[str, Any]]] = {}
     others: dict[str, dict[str, Any]] = {}
+
+    def segments(at: int) -> tuple[str, str]:
+        """The offer's text around a link: up to the next link (after), back to the previous one (before)."""
+        i = next(k for k, sp in enumerate(spans) if sp[0] == at)
+        end = spans[i][1]
+        return (plain[max(at - WINDOW_BEFORE, spans[i - 1][1] if i else 0):at],
+                plain[end:min(end + WINDOW_AFTER, spans[i + 1][0] if i + 1 < len(spans) else len(plain))])
+
+    def clickout(url: str, label: str, at: int, pos: int) -> None:
+        before, after = segments(at)
+        if (rid := _named(label, names or [])):
+            price = _first_price(after) or _first_price(before, last=True)
+        elif CTA_RE.match(label.strip()) and (rid := _named(before, names or [], last=True)):
+            price = _first_price(before, last=True)   # a row: [shop logo] [price] [to the shop →]
+        else:
+            return
+        if not price:
+            return
+        css = css_of(f"{before} {label} {after}")
+        cur = found.setdefault(rid, {})
+        key = "#" + rid
+        if key not in cur:
+            cur[key] = {"url": None, "clickout": url, "title": "", "score": 0.0, "pos": pos, "price": price, "css": css}
+
     for pos, (raw, label, at) in enumerate(hits):
         try:
             url = normalize_url(raw)
@@ -181,6 +228,10 @@ def offers(page: str, domains: dict[str, str], product: dict[str, Any] | None = 
         p = urlparse(url)
         host = (p.hostname or "").lower()
         path = p.path
+        if names and at >= 0 and not any(_host_ok(url, d) for d in domains.values()) and \
+                (NOT_SHOPS.search(host) or (own_domain and _host_ok(url, own_domain))):
+            clickout(url, label, at, pos)                # a click-out of the comparison site: the shop by its name
+            continue
         if len(path.strip("/")) < 3 or is_search_url(url) or ASSET_RE.search(path):
             continue
         words = f"{label} {slug_title(url)}".strip()
@@ -188,12 +239,7 @@ def offers(page: str, domains: dict[str, str], product: dict[str, Any] | None = 
             continue
         score = title_score(name, brand, words)[0] if name and words else 0.0
         ldo = ld.get(raw) or ld.get(url) or {}
-        after = before = ""
-        if at >= 0:                               # the offer's text: up to the next link, else back to the previous one
-            i = next(k for k, sp in enumerate(spans) if sp[0] == at)
-            end = spans[i][1]
-            after = plain[end:min(end + WINDOW_AFTER, spans[i + 1][0] if i + 1 < len(spans) else len(plain))]
-            before = plain[max(at - WINDOW_BEFORE, spans[i - 1][1] if i else 0):at]
+        before, after = segments(at) if at >= 0 else ("", "")
         price = ldo.get("price") or _first_price(after) or _first_price(before, last=True)
         css = css_of(after) or css_of(before) or css_of(ldo.get("seller") or "")
         item = {"url": url, "title": label, "score": score, "pos": pos, "price": price, "css": css}
@@ -203,7 +249,7 @@ def offers(page: str, domains: dict[str, str], product: dict[str, Any] | None = 
             if key in skip:
                 continue
             cur = found.setdefault(rid, {})
-            if key not in cur or score > cur[key]["score"]:
+            if key not in cur or score > cur[key]["score"] or cur[key]["url"] is None:
                 cur[key] = item
         elif host and not NOT_SHOPS.search(host) and not (own_domain and _host_ok(url, own_domain)) and price:
             dom = host.removeprefix("www.")
@@ -211,6 +257,27 @@ def offers(page: str, domains: dict[str, str], product: dict[str, Any] | None = 
                 others[dom] = {**item, "domain": dom, "seller": ldo.get("seller")}
     by_shop = {rid: sorted(c.values(), key=lambda x: (-round(x["score"], 1), x["pos"])) for rid, c in found.items()}
     return by_shop, sorted(others.values(), key=lambda x: (-x["score"], x["pos"]))
+
+
+def product_pages(page: str, own_domain: str, product: dict[str, Any]) -> list[str]:
+    """Product pages on a comparison site's own domain in its search results, best match first: the page that lists
+    every shop's price for that product. A title there is short ("Sony WH-1000XM5 Zwart"): it must name every model
+    number of the product and cover at least half of its name, and must not be an accessory."""
+    from .parsers import TITLE_DOUBT
+
+    out: list[tuple[float, int, str]] = []
+    for i, m in enumerate(HREF_RE.finditer(_flatten(page))):
+        label = _text(m.group(3))
+        for u in _urls_in(m.group(2)) or ([f"https://www.{own_domain}{m.group(2)}"] if m.group(2).startswith("/") else []):
+            if not _host_ok(u, own_domain) or is_search_url(u) or ASSET_RE.search(urlparse(u).path):
+                continue
+            words = f"{label} {slug_title(u)}"
+            if accessory_word(words, product.get("name")):
+                continue
+            score, missing = title_score(product.get("name"), product.get("brand"), words)
+            if score >= TITLE_DOUBT and not missing and u not in [x[2] for x in out]:
+                out.append((score, i, u))
+    return [u for _s, _i, u in sorted(out, key=lambda x: (-x[0], x[1]))]
 
 
 def extract(page: str, domains: dict[str, str], product: dict[str, Any] | None = None,

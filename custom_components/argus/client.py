@@ -16,8 +16,8 @@ from .models import gtin_key
 from .parsers import (TITLE_DOUBT, TITLE_OK, Parsed, accessory_word, bot_wall, is_search_url, parse_page, product_identity,
                       product_match, search_candidates, title_score, url_key, wrong_product)
 from .const import RETAILERS
-from .finders import offers
-from .shops import active_finders, all_domains, domain_of, finder_address, finder_key, home_of, ready, search_address
+from .finders import offers, product_pages
+from .shops import active_finders, shop_names, all_domains, domain_of, finder_address, finder_key, home_of, ready, search_address
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -484,7 +484,20 @@ class Fetcher:
         page = await self._finder_page(finder, query, product)
         if not page:
             return {}, []
-        by_shop, others = offers(page, all_domains(), product, skip, url_key, finder["domain"])
+        names = shop_names()
+        by_shop, others = offers(page, all_domains(), product, skip, url_key, finder["domain"], names)
+        if finder.get("follow") and product.get("name"):
+            # Tweakers, Kieskeurig, Beslist…: the search lists products; the product's own page there lists every shop
+            for url in product_pages(page, finder["domain"], product)[:1]:
+                t0 = time.time()
+                status, sub, err = await self.get_page(finder_key(finder["id"]), url)
+                self._trace(finder_key(finder["id"]), "page", url, t0, status or None, len(sub or ""), "ok" if sub else None, err, product.get("id"))
+                if sub and not err and status < 400:
+                    more, new = offers(sub, all_domains(), product, skip, url_key, finder["domain"], names)
+                    for rid, items in more.items():
+                        have = {x["url"] for x in by_shop.setdefault(rid, [])}
+                        by_shop[rid].extend(i for i in items if i["url"] not in have or i["url"] is None)
+                    others += [o for o in new if o["domain"] not in {x["domain"] for x in others}]
         for items in [*by_shop.values(), others]:
             for i in items:
                 i["finder"], i["by_ean"] = finder["id"], bool(gtin_key(query))
@@ -516,7 +529,7 @@ class Fetcher:
     async def _harvested(self, retailer: str, product: dict[str, Any], skip: set[str] | frozenset[str]) -> list[dict[str, Any]]:
         """Links to this shop found in comparison sites."""
         by_shop, _others = await self.harvest(product)
-        return [c for c in by_shop.get(retailer, []) if url_key(retailer, c["url"]) not in skip]
+        return [c for c in by_shop.get(retailer, []) if c["url"] and url_key(retailer, c["url"]) not in skip]
 
     # ----------------------------------------------------------------- identity (name ↔ barcode)
     async def identify(self, name: str | None = None, ean: str | None = None, brand: str | None = None,
@@ -543,7 +556,7 @@ class Fetcher:
             return {}
         for finder in active_finders("aggregator") + active_finders("websearch"):
             by_shop, _new = await self._finder_links(finder, query, probe if name else {}, frozenset())
-            ranked = sorted(((i["score"], rid, i["url"]) for rid, items in by_shop.items() for i in items), key=lambda x: -x[0])
+            ranked = sorted(((i["score"], rid, i["url"]) for rid, items in by_shop.items() for i in items if i["url"]), key=lambda x: -x[0])
             for score, rid, url in ranked:
                 if ean or score >= TITLE_OK:
                     add(rid, url)
@@ -610,7 +623,7 @@ class Fetcher:
         for finder in active_finders("websearch"):
             links, _new = await self._finder_links(finder, f"{search_terms(product)} {shop}".strip(), product, skip)
             for item in links.get(retailer, []):
-                if item["url"] not in [x["url"] for x in out]:
+                if item["url"] and item["url"] not in [x["url"] for x in out]:
                     out.append(item)
             if out:
                 break
