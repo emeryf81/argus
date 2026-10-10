@@ -299,7 +299,11 @@ def auto_shop_id(domain: str) -> str:
 
 
 def _add_auto_shops() -> None:
+    from .finders import public_host
+
     for s in AUTO_SHOPS.values():
+        if (s.get("country") or DEFAULT_COUNTRY) != STATE.get("country", DEFAULT_COUNTRY) or not public_host(s["domain"]):
+            continue                                  # found in another country, or not a public shop: not used here
         if s["id"] in RETAILERS or any(_on("https://" + s["domain"], d) for d in all_domains().values()):
             continue
         RETAILERS[s["id"]] = (s["name"], "EUR")

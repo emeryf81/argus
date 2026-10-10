@@ -118,7 +118,7 @@ def ws_overview(hass, connection, msg):
                   "heartbeat": coord.store.get("relay_heartbeat")},
         "deal_rules": coord.deal_rules, "marks": _marks(), "alert_steps": list(ALERT_STEPS),
         "auto_shops": {k: {"name": v["name"], "domain": v["domain"], "found_by": coord.via_name(v.get("found_by"))}
-                       for k, v in (coord.store.get("auto_shops") or {}).items()},
+                       for k, v in (coord.store.get("auto_shops") or {}).items() if k in RETAILERS},
         "product_limit": coord.product_limit, "full_refresh": coord.dev(CONF_DEV_FULL_REFRESH), "manual": coord.manual_status(),
         "health": {
             "errors": sum(s["offers_error"] for s in data["statuses"].values()),

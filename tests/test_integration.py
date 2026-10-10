@@ -470,7 +470,8 @@ async def test_discovery_via_web_search_and_price_comparison_sites(hass: HomeAss
     pid = (await coord.add_product("https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/", discover=False))["id"]
     res = await coord.discover_product(pid)
     offers = coord.store["offers"][pid]
-    assert res["found"] == 3 and set(offers) == {"bol", "krefel", "vandenborre", "fnac_be"} - set() or "fnac_be" in offers
+    assert res["found"] == 3
+    assert set(offers) == {"bol", "krefel", "vandenborre", "fnac_be"}
     assert offers["fnac_be"]["found_via"] == "web" and offers["fnac_be"]["url"] == fnac
     assert offers["vandenborre"]["found_via"] == "agg"
     assert offers["vandenborre"]["url"] == "https://www.vandenborre.be/nl/p/sony-wh-1000xm5/77/"      # tracking parameter gone
@@ -593,3 +594,33 @@ async def test_tweakers_style_clickouts_give_prices_per_shop_name(hass: HomeAssi
     assert offers["vandenborre"].get("url") is None                                  # price known, page not yet
     assert offers["krefel"]["last_price"] == 295.0
     assert not [h for h in world.hits if "oorkussens" in h or "clickout" in h]       # accessories and click-outs never opened
+
+
+def test_comparison_site_links_to_the_local_network_never_become_shops():
+    from custom_components.argus.finders import offers, public_host
+
+    page_ = ("<html><body>"
+             '<a href="https://192.168.1.1/admin/sony-wh-1000xm5">Sony WH-1000XM5</a> € 99,00'
+             '<a href="https://router.local/p/sony-wh-1000xm5">Sony WH-1000XM5</a> € 98,00'
+             '<a href="http://shop.example-store.be/p/sony-wh-1000xm5">Sony WH-1000XM5</a> € 97,00'
+             '<a href="https://www.exellent.be/nl/sony-wh-1000xm5/1">Sony WH-1000XM5</a> € 269,95</body></html>')
+    _by_shop, others = offers(page_, {}, {"name": "Sony WH-1000XM5", "brand": "Sony"})
+    assert [o["domain"] for o in others] == ["exellent.be"]
+    assert not public_host("10.0.0.5") and not public_host("nas.lan") and not public_host("localhost") and public_host("coolblue.be")
+
+
+async def test_auto_shops_check_the_address_and_stay_in_their_country(hass):
+    from custom_components.argus import shops
+
+    with pytest.raises(ValueError, match="not a public address"):
+        await Fetcher._check_public("https://127.0.0.1/p/1")
+    try:
+        shops.STATE["country"] = "nl"
+        shops.set_auto_shops([{"id": "a_exellent_be", "name": "Exellent", "domain": "exellent.be", "country": "be"},
+                              {"id": "a_mobiel_nl", "name": "Mobiel", "domain": "mobiel.nl", "country": "nl"},
+                              {"id": "a_nas_lan", "name": "NAS", "domain": "nas.lan", "country": "nl"}])
+        assert "a_mobiel_nl" in shops.RETAILERS
+        assert "a_exellent_be" not in shops.RETAILERS and "a_nas_lan" not in shops.RETAILERS
+    finally:
+        shops.STATE["country"] = "be"
+        shops.set_auto_shops([])

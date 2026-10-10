@@ -1776,7 +1776,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Ask the comparison sites what this product costs where (sponsored offers included: Shoparize, Producthero,
         Channable…). Their price is kept per shop and used when the shop's own page can't be read; shops you don't have
         yet are added to your list. Returns how many new links it gave."""
-        from .shops import AUTO_SHOPS, MAX_AUTO_SHOPS, active_finders, auto_shop_id, set_auto_shops
+        from .shops import AUTO_SHOPS, MAX_AUTO_SHOPS, STATE, active_finders, auto_shop_id, set_auto_shops
 
         p = self.store["products"].get(pid)
         if not p or not ready() or not active_finders("aggregator"):
@@ -1797,11 +1797,11 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if rid not in auto and len(auto) < MAX_AUTO_SHOPS:
                 name = (item.get("seller") or item["domain"].split(".")[0].replace("-", " ").title())[:40]
                 auto[rid] = {"id": rid, "name": name, "domain": item["domain"], "found_by": item.get("css") or item.get("finder"),
-                             "categories": [], "added": now}
+                             "categories": [], "added": now, "country": STATE.get("country", "be")}
                 set_auto_shops(list(auto.values()))
                 self.log("ok", "shop", T("new shop found via {source}: {shop}", source=self.via_name(item.get("css") or item.get("finder")), shop=name),
                          product=pid, retailer=rid, url=item["url"], source="server")
-            if rid in auto:
+            if rid in AUTO_SHOPS:                              # registered here (this country, a public shop)
                 by_shop.setdefault(rid, []).insert(0, item)
                 if p.get("shops") and rid not in p["shops"]:
                     p["shops"].append(rid)

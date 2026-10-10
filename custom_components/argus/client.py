@@ -203,6 +203,8 @@ class Fetcher:
         home = redirect_home(retailer, url)
         for _hop in range(MAX_REDIRECTS + 1):
             check_url(url, home)
+            if retailer.startswith("a_"):
+                await self._check_public(url)    # a shop found through a comparison site: never the local network
             if self._curl_ok:
                 # streamed: a body over MAX_BODY is never held in memory as a whole
                 resp = await sess.get(url, headers=headers, allow_redirects=False, stream=True)
@@ -247,6 +249,21 @@ class Fetcher:
             except LookupError:                       # a charset name Python doesn't know
                 return status, raw.decode("utf-8", errors="replace")
         raise ValueError("too many redirects")
+
+    @staticmethod
+    async def _check_public(url: str) -> None:
+        """Refuse an address whose name resolves to a private, loopback or link-local address."""
+        import ipaddress
+        import socket
+
+        host = urlparse(url).hostname or ""
+        try:
+            infos = await asyncio.get_running_loop().getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        except OSError as err:
+            raise ValueError(f"cannot resolve {host}") from err
+        for info in infos:
+            if not ipaddress.ip_address(info[4][0].split("%")[0]).is_global:
+                raise ValueError(f"{host} is not a public address")
 
     def next_free(self, url_or_site: str, search: bool = False) -> float:
         """Seconds until this site may be asked again (searches: also the search gap)."""

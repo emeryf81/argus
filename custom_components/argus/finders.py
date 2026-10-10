@@ -107,6 +107,26 @@ NOT_SHOPS = re.compile(r"(?:^|\.)(?:google|googleadservices|googlesyndication|do
 WINDOW_BEFORE, WINDOW_AFTER = 250, 450        # characters of page text around a link that belong to its offer
 
 
+PRIVATE_SUFFIX = re.compile(r"(?:^|\.)(?:localhost|local|lan|internal|intranet|home|corp|arpa|test|invalid|example|onion)$", re.I)
+
+
+def public_host(host: str) -> bool:
+    """A name that can only be a shop on the public internet: no IP address, no single word, no local or reserved
+    suffix. (Shops found through a comparison site are fetched by the server, so a link to the local network that a
+    page might carry must never become a shop.)"""
+    import ipaddress
+
+    host = (host or "").lower().rstrip(".")
+    try:
+        ipaddress.ip_address(host.strip("[]"))
+        return False
+    except ValueError:
+        pass
+    labels = host.split(".")
+    return (len(labels) >= 2 and re.fullmatch(r"[a-z]{2,24}", labels[-1]) is not None and not PRIVATE_SUFFIX.search(host)
+            and all(re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", x) for x in labels))
+
+
 def css_of(text: str) -> str | None:
     """The comparison service named in an offer's text ('shoparize', …), or None."""
     m = CSS_RE.search(text or "")
@@ -251,7 +271,8 @@ def offers(page: str, domains: dict[str, str], product: dict[str, Any] | None = 
             cur = found.setdefault(rid, {})
             if key not in cur or score > cur[key]["score"] or cur[key]["url"] is None:
                 cur[key] = item
-        elif host and not NOT_SHOPS.search(host) and not (own_domain and _host_ok(url, own_domain)) and price:
+        elif host and url.startswith("https://") and public_host(host) and not NOT_SHOPS.search(host) \
+                and not (own_domain and _host_ok(url, own_domain)) and price:
             dom = host.removeprefix("www.")
             if dom not in others or score > others[dom]["score"]:
                 others[dom] = {**item, "domain": dom, "seller": ldo.get("seller")}
