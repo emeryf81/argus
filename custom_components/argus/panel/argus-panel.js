@@ -83,11 +83,23 @@ const API_LEVEL = 1;
 /** How a price was read, as one letter: ⓤ your own browser (userscript), ⌂ the shop's own site. */
 const VIA_MARK = { relay: "ⓤ", userscript: "ⓤ" };
 const viaTitle = (via) => (via === "relay" || via === "userscript" ? t("Price fetched by your own browser (userscript)") : t("Read directly from the shop's own site"));
-const viaMark = (via, direct = true) => (VIA_MARK[via] ? `<span class="vbadge" title="${esc(viaTitle(via))}">${VIA_MARK[via]}</span>`
+/** Comparison services (from the server): key → {letter, name}; a price they showed gets their letter in a circle. */
+let MARKS = {};
+const circled = (l) => (/^[a-z]$/.test(l || "") ? String.fromCodePoint(0x24d0 + l.charCodeAt(0) - 97) : "•");
+const cssMark = (key) => {
+  const m = MARKS[key] || { letter: (key || "?")[0], name: key };
+  return `<span class="vbadge css" title="${esc(t("Price shown by {service} (comparison site): the shop's own page could not be read", { service: m.name }))}">${circled(m.letter)}</span>`;
+};
+const viaMark = (via, direct = true) => ((via || "").startsWith("css:") ? cssMark(via.slice(4))
+  : VIA_MARK[via] ? `<span class="vbadge" title="${esc(viaTitle(via))}">${VIA_MARK[via]}</span>`
   : direct ? `<span class="vbadge" title="${esc(viaTitle(""))}">⌂</span>` : "");
 /** Why a shop has no price (sold out / no longer sold): a warning, not an error. */
 const unavailableText = (why) => (why === "discontinued" ? t("no longer sold (out of the range)") : t("sold out"));
-const viaBadge = (via) => (VIA_MARK[via] ? " " + viaMark(via) : "");
+const viaBadge = (via) => (VIA_MARK[via] || (via || "").startsWith("css:") ? " " + viaMark(via) : "");
+/** Cheap is green, dear is red: the colour of a price between the cheapest (0) and the dearest (1) shop. */
+const priceTone = (x) => `hsl(${Math.round(125 * (1 - Math.max(0, Math.min(1, x))))} 62% 40%)`;
+/** The deal-alert steps: light green (10 %) to bright green (50 %). */
+const alertTone = (pct) => { const k = Math.max(0, Math.min(1, (pct - 10) / 40)); return `hsl(${Math.round(110 + 25 * k)} ${Math.round(45 + 50 * k)}% ${Math.round(62 - 22 * k)}%)`; };
 /** A small version of a product image (marketplace images come in sizes; others are used as they are). */
 const thumb = (url, w = 320) => {
   if (!url) return url;
@@ -449,6 +461,31 @@ details[open] .dfhint{display:none}.wsg{display:grid;grid-template-columns:max-c
 .kpis{grid-template-columns:1fr 1fr;gap:8px}.kpi{padding:10px 12px}.kpi b{font-size:19px}
 .grid{grid-template-columns:1fr 1fr;gap:10px}.card .img{height:96px}.card .img img{max-height:88px}.card .p{font-size:17px}.card .ring{width:34px!important;height:34px!important}
 .hero .img{height:130px}.hero .p{font-size:28px}.fbar .search{min-width:100%}.panel{padding:12px}}
+/* watch list: product · cheapest · all shops (green cheap → red dear) · max price · deal alert */
+.watch{display:flex;flex-direction:column;gap:8px}
+.wrow{display:grid;grid-template-columns:56px minmax(160px,1.6fr) minmax(120px,.9fr) minmax(180px,2fr) 110px auto;gap:12px;align-items:center;background:var(--ar-card);border:1px solid var(--ar-line);border-radius:14px;padding:10px 12px;cursor:pointer;box-shadow:var(--ar-shadow);animation:rise .35s both;animation-delay:calc(var(--i,0)*25ms)}
+.wrow:hover{border-color:color-mix(in srgb,var(--ar-accent) 40%,var(--ar-line))}
+.wrow.whead{background:none;border:0;box-shadow:none;padding:0 12px;cursor:default;font-size:12px;color:var(--ar-muted);text-transform:uppercase;letter-spacing:.04em;animation:none}
+.wimg{width:56px;height:56px;border-radius:10px;overflow:hidden;background:#fff;display:grid;place-items:center}.wimg img{max-width:100%;max-height:100%;object-fit:contain}.wimg .ph{font-size:26px}
+.wname{min-width:0}.wname b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.wname .muted{font-size:12px}.badges.inl{position:static;display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.wbest b{font-size:20px;font-variant-numeric:tabular-nums}.wbest .muted{font-size:12px}
+.wstrip{display:flex;flex-wrap:wrap;gap:4px}
+.wshop{display:inline-flex;gap:4px;align-items:center;padding:3px 8px;border-radius:99px;font-size:12px;text-decoration:none;color:var(--c);background:color-mix(in srgb,var(--c) 12%,var(--ar-card));border:1px solid color-mix(in srgb,var(--c) 35%,transparent)}
+.wshop b{font-variant-numeric:tabular-nums}.wshop:hover{background:color-mix(in srgb,var(--c) 22%,var(--ar-card))}
+.wmax{display:flex;align-items:center;gap:4px;font-size:13px;color:var(--ar-muted)}.wmax input{width:72px;padding:6px 8px;border-radius:8px;border:1px solid var(--ar-line);background:var(--ar-card);color:var(--ar-text);font:inherit}
+.wmax.hit input{border-color:var(--ar-green);box-shadow:0 0 0 2px color-mix(in srgb,var(--ar-green) 25%,transparent)}
+.walerts{display:flex;gap:4px;flex-wrap:wrap}
+.walert{border:1px solid color-mix(in srgb,var(--c) 70%,transparent);background:color-mix(in srgb,var(--c) 24%,var(--ar-card));color:color-mix(in srgb,var(--c) 55%,var(--ar-text));border-radius:99px;padding:4px 9px;font:600 12px/1 inherit;cursor:pointer}
+.walert.on{background:var(--c);color:#fff;border-color:var(--c);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 30%,transparent)}
+.wadd{border:2px dashed var(--ar-line);background:none;border-radius:14px;padding:12px;color:var(--ar-muted);font:inherit;cursor:pointer}.wadd:hover{border-color:var(--ar-accent);color:var(--ar-accent)}
+@media (max-width:900px){.wrow{grid-template-columns:48px 1fr auto;grid-template-areas:"img name best" "strip strip strip" "max alerts alerts"}.wrow.whead{display:none}
+  .wimg{grid-area:img;width:48px;height:48px}.wname{grid-area:name}.wbest,.wrow>.muted{grid-area:best;text-align:right}.wstrip{grid-area:strip}.wmax{grid-area:max}.walerts{grid-area:alerts;justify-content:flex-end}}
+.vbadge.css{color:#7a4fd0;font-weight:700}
+/* add: one box for address, name or barcode, then the preview with suggested shops */
+.addq{display:flex;gap:8px}.addq input{flex:1;padding:10px 12px;border-radius:10px;border:1px solid var(--ar-line);background:var(--ar-card);color:var(--ar-text);font:inherit;font-size:15px}
+.preview{margin-top:14px;padding:14px;border:1px solid var(--ar-line);border-radius:14px;background:var(--ar-soft)}.pid{display:flex;gap:14px;align-items:flex-start}
+.pshops{display:flex;flex-wrap:wrap;gap:6px}.pshop{display:inline-flex;gap:6px;align-items:center;padding:5px 10px;border-radius:99px;border:1px solid var(--ar-line);background:var(--ar-card);cursor:pointer;font-size:13px}
+.pshop.on{border-color:var(--ar-green);background:color-mix(in srgb,var(--ar-green) 12%,var(--ar-card))}.pshop input{margin:0}
 @media (prefers-reduced-motion: reduce){*,*::before{animation:none!important;transition:none!important}.ln{stroke-dashoffset:0}}
 `;
 
@@ -606,9 +643,59 @@ class ArgusPanel extends HTMLElement {
   }
   vAll() {
     if (!this.products.length) return this.vToday();
-    return `${this.banner()}${this.filterBar({ list: this.products, threshold: true, sorts: [["score", "Deal score"], ["priority", "Priority"], ["discount", "Highest discount"], ["price", "Lowest price"], ["drop", "Biggest drop"], ["spread", "Biggest difference between shops"], ["newest", "Newest first"], ["name", "Name"]] })}<div id="results" data-fn="rAll">${this.rAll()}</div>`;
+    const view = this.state.view || "list";
+    const toggle = `<div class="chips" style="margin:0 0 8px"><span class="chip ${view === "list" ? "on" : ""}" data-view="list">☰ ${t("List")}</span><span class="chip ${view === "cards" ? "on" : ""}" data-view="cards">▦ ${t("Cards")}</span></div>`;
+    return `${this.banner()}${this.filterBar({ list: this.products, threshold: view === "cards", sorts: [["score", "Deal score"], ["priority", "Priority"], ["discount", "Highest discount"], ["price", "Lowest price"], ["drop", "Biggest drop"], ["spread", "Biggest difference between shops"], ["newest", "Newest first"], ["name", "Name"]] })}${toggle}<div id="results" data-fn="rAll">${this.rAll()}</div>`;
   }
-  rAll() { const l = this.sorted(this.filtered(this.products), this.state.f.sort); return l.length ? this.gridOf(l, true) : `<div class="grid">${this.addTile()}</div>` + this.emptyState("🔍", t("Nothing found with these filters.")); }
+  rAll() {
+    const l = this.sorted(this.filtered(this.products), this.state.f.sort);
+    if (!l.length) return `<div class="grid">${this.addTile()}</div>` + this.emptyState("🔍", t("Nothing found with these filters."));
+    return (this.state.view || "list") === "cards" ? this.gridOf(l, true) : this.watchList(l);
+  }
+  /** The list you look at every day: per product where it is cheapest and for how much, every shop coloured from green
+   * (cheap) to red (dear), your maximum price and your deal alert, both editable right there. */
+  watchList(list) {
+    const max = this.state.gridMax || GRID_PAGE, shown = list.slice(0, max);
+    const more = list.length > max ? `<div style="text-align:center;margin:14px 0"><button class="btn ghost" data-gridmore="1">${t("Show {n} more ({total} left)", { n: Math.min(GRID_PAGE, list.length - max), total: list.length - max })}</button></div>` : "";
+    const head = `<div class="wrow whead"><span></span><span>${t("Product")}</span><span>${t("Cheapest")}</span><span>${t("All shops")}</span><span>${t("Max. price")}</span><span>${t("Tell me when it is suddenly cheaper")}</span></div>`;
+    return `<div class="watch">${head}${shown.map((s, i) => this.watchRow(s, i)).join("")}<button class="wadd" data-addtile="1">＋ ${t("Add a product")}</button></div>${more}`;
+  }
+  watchRow(s, i = 0) {
+    const R = this.state.data.retailers, offers = Object.entries(s.offers || {}).filter(([, o]) => o.price != null && o.link_status !== "suspect");
+    offers.sort((a, b) => a[1].price - b[1].price);
+    const lo = offers.length ? offers[0][1].price : null, hi = offers.length ? offers[offers.length - 1][1].price : null;
+    const tone = (p) => priceTone(hi > lo ? (p - lo) / (hi - lo) : 0);
+    const best = s.best_retailer ? (s.offers || {})[s.best_retailer] || {} : {};
+    const d = this.discountOf(s);
+    const cheapest = s.best_price != null ? `<div class="wbest"><b style="color:${tone(s.best_price)}">${EUR(s.best_price)}</b>${viaBadge(best.via)}<div class="muted">${t("at {shop}", { shop: esc(R[s.best_retailer] || s.best_retailer) })}${d != null && d > 0 ? ` · <span style="color:${alertTone(Math.min(50, d))};font-weight:700">−${Math.round(d)}%</span>` : ""}</div></div>`
+      : `<div class="muted">${(this.state.data.first_checks || []).includes(s.id) ? "⏳ " + t("looking for shops…") : Object.keys(s.offers || {}).length ? t("no price") : t("no shop links yet")}</div>`;
+    const strip = offers.map(([rid, o]) => `<a class="wshop" href="${esc(o.url || "#")}" target="_blank" rel="noopener noreferrer" data-stop style="--c:${tone(o.price)}" title="${esc(R[rid] || rid)}: ${esc(EUR(o.price))}">${esc((R[rid] || rid).slice(0, 14))} <b>${EUR0(o.price)}</b>${o.via && o.via.startsWith("css:") ? viaMark(o.via) : ""}</a>`).join("");
+    const steps = (this.state.data.alert_steps || [10, 20, 30, 40, 50]);
+    const alerts = steps.map((p) => `<button class="walert ${s.alert_pct === p ? "on" : ""}" data-alert="${p}" data-pid="${esc(s.id)}" style="--c:${alertTone(p)}" title="${esc(t("Tell me when it is {pct}% cheaper than usual", { pct: p }))}">−${p}%</button>`).join("");
+    const hit = s.target_hit ? " hit" : "";
+    return `<div class="wrow" style="--i:${i}" data-set="${esc(s.id)}" tabindex="0"><div class="wimg">${this.img(s)}</div>
+      <div class="wname"><b>${esc(s.name || s.ean || s.id)}</b><div class="muted">${[s.brand, CATEGORY_ICONS[s.category] + " " + this.catName(s.category), s.priority ? "★".repeat(s.priority) : ""].filter(Boolean).map(esc).join(" · ")}</div>${this.badges(s) ? `<div class="badges inl">${this.badges(s)}</div>` : ""}</div>
+      ${cheapest}<div class="wstrip">${strip || `<span class="muted">–</span>`}</div>
+      <label class="wmax${hit}" data-stop>€ <input class="wtarget" data-pid="${esc(s.id)}" type="text" inputmode="decimal" autocomplete="off" data-money value="${s.target_price ?? ""}" placeholder="${t("max")}" title="${esc(t("The most it may cost: you get a message when it is at or below this price"))}">${s.target_hit ? " 🎯" : ""}</label>
+      <div class="walerts" data-stop>${alerts}</div></div>`;
+  }
+  /** The editable bits of the watch list: maximum price, deal alert, list/cards. */
+  bindWatch(root) {
+    const save = (pid, fields, msg) => this._hass.callWS({ type: "argus/update_product", product: pid, fields }).then(async () => { await this.load(); if (msg) this.toast(msg, "ok"); }).catch((e) => this.toast(tx(e.message), "err"));
+    root.querySelectorAll("[data-stop]").forEach((el) => el.addEventListener("click", (e) => e.stopPropagation()));
+    root.querySelectorAll(".wtarget").forEach((i) => {
+      const go = () => { const v = i.value.trim(), x = v ? +money(v) : null; if (v && !(x > 0)) return this.toast(t("Invalid price"), "err");
+        save(i.dataset.pid, { target_price: x }, x ? t("Maximum price {price} saved", { price: EUR(x) }) : t("Maximum price removed")); };
+      i.addEventListener("change", go); i.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); i.blur(); } });
+    });
+    root.querySelectorAll(".walert").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const p = this.products.find((x) => x.id === b.dataset.pid) || {}, pct = +b.dataset.alert, off = p.alert_pct === pct;
+      b.parentElement.querySelectorAll(".walert").forEach((x) => x.classList.toggle("on", !off && x === b));
+      save(b.dataset.pid, { alert_pct: off ? null : pct }, off ? t("Deal alert off") : t("You get a message when it is {pct}% cheaper than usual", { pct }));
+    }));
+    this.shadowRoot.querySelectorAll("[data-view]").forEach((c) => c.onclick = () => { this.state.view = c.dataset.view; this.persist(); this.renderContent(); });
+  }
   /** Prices → Deal settings: when does a price count as a deal? */
   vDealSettings() {
     const st = this.state.settings;
@@ -656,24 +743,83 @@ class ArgusPanel extends HTMLElement {
 
   // ---------------------------------------------------------------- MANAGE → add / import
   vAdd() {
-    const pre = this.state.addPrefill || {}, d = this.state.data, cats = d.categories, shops = Object.entries(d.retailers);
-    const byCat = {}; for (const [rid, label] of shops) { const cs = (d.shop_categories || {})[rid] || []; for (const c of (cs.length ? cs : Object.keys(cats))) (byCat[c] = byCat[c] || []).push(label); }
+    const pre = this.state.addPrefill || {}, pv = this.state.addPreview;
+    const q = pre.url || pre.ean || pre.name || (pv && pv.q) || "";
     return `<div class="panel"><h3>＋ ${t("Add a product")}</h3>
-      <p>${t("Paste the address of a product page at one of your shops (e.g. bol, Amazon, Fnac). ARGUS reads the name, barcode and price from that page and then looks the same product up at the other shops of its category.")}</p>
-      <div class="form"><label style="grid-column:1/-1">${t("Address of the product page")}<input id="a_url" type="url" inputmode="url" autocomplete="off" placeholder="https://www.example-shop.be/p/…" value="${esc(pre.url || "")}" style="width:100%"></label></div>
-      <details style="margin:8px 0" ${pre.name || pre.ean ? "open" : ""}><summary>${t("No address, or you want to fill things in yourself?")}</summary>
-        <p class="muted" style="font-size:13px">${t("Without an address a name is enough (a barcode makes the search much surer). What you fill in here wins over what the page says.")}</p>
-        <div class="form"><label style="grid-column:span 2">${t("Name")}<input id="a_name" value="${esc(pre.name || "")}" placeholder="${t("e.g. {example}", { example: "Sony WH-1000XM5" })}"></label>
-          <label>${t("Barcode (EAN / ISBN)")}<input id="a_ean" inputmode="numeric" autocomplete="off" value="${esc(pre.ean || "")}"></label>
-          <label>${t("Brand")}<input id="a_brand"></label><label>${t("Model number")}<input id="a_mpn"></label>
-          <label>${t("Category")}<select id="a_cat"><option value="">${t("automatic")}</option>${Object.entries(cats).map(([k, v]) => `<option value="${esc(k)}">${CATEGORY_ICONS[k] || ""} ${esc(t(v))}</option>`).join("")}</select></label></div></details>
-      <div class="form"><label>${t("Target price")} (€)<input id="a_target" type="text" inputmode="decimal" autocomplete="off" data-money placeholder="${t("optional: you get a message below it")}"></label>
-        <label>${t("Reference price")} (€)<input id="a_ref" type="text" inputmode="decimal" autocomplete="off" data-money placeholder="${t("optional: the usual price")}"></label>
+      <p>${t("Paste the address of a product page, type a name or scan/type a barcode (EAN/ISBN). ARGUS looks it up: from a name it finds the barcode, from a barcode the name, and then it suggests which of your shops to watch for this kind of product.")}</p>
+      <div class="addq"><input id="a_q" autocomplete="off" placeholder="${t("https://… or Sony WH-1000XM5 or 4548736132580")}" value="${esc(q)}"><button class="btn" id="a_look">🔎 ${t("Look up")}</button></div>
+      <div id="a_kind" class="muted" style="font-size:12px;margin-top:4px"></div>
+      <div id="a_preview">${pv && pv.res ? this.previewHtml(pv.res) : ""}</div><div id="a_result"></div></div>`;
+  }
+  /** What ARGUS found before adding: who the product is, and which shops to watch (suggested by its kind). */
+  previewHtml(r) {
+    const d = this.state.data, cats = d.categories, steps = d.alert_steps || [10, 20, 30, 40, 50];
+    const pv = this.state.addPreview, chosen = pv.chosen || (pv.chosen = new Set(r.shops.filter((x) => x.suggested).map((x) => x.id)));
+    const shop = (x) => `<label class="pshop ${chosen.has(x.id) ? "on" : ""}"><input type="checkbox" class="a_shop" value="${esc(x.id)}" ${chosen.has(x.id) ? "checked" : ""}> ${esc(x.label)}${x.found ? ` <span class="ok" title="${esc(t("Found there already"))}">✓${x.price != null ? " " + EUR(x.price) : ""}</span>` : ""}</label>`;
+    const sug = r.shops.filter((x) => x.suggested), rest = r.shops.filter((x) => !x.suggested);
+    const eanNote = r.ean ? (r.ean_sure ? `✓ ${t("barcode {ean}", { ean: r.ean })}` : `⚠ ${t("barcode {ean} (not sure yet: only one page)", { ean: r.ean })}`) : `⚠ ${t("no barcode found yet: ARGUS keeps looking and searches by name meanwhile")}`;
+    return `<div class="preview"><div class="pid"><div class="img" style="width:96px;height:96px;display:grid;place-items:center">${this.img(r)}</div>
+        <div style="flex:1;min-width:0">${r.existing ? `<div class="muted" style="font-size:12px">${t("You already track this product: what you choose is added to it.")}</div>` : ""}
+          <div class="form" style="margin:0"><label style="grid-column:1/-1">${t("Name")}<input id="a_name" value="${esc(r.name || "")}"></label>
+          <label>${t("Barcode (EAN / ISBN)")}<input id="a_ean" inputmode="numeric" value="${esc(r.ean || "")}"></label>
+          <label>${t("Category")}<select id="a_cat">${Object.entries(cats).map(([k, v]) => `<option value="${esc(k)}" ${r.category === k ? "selected" : ""}>${CATEGORY_ICONS[k] || ""} ${esc(t(v))}</option>`).join("")}</select></label></div>
+          <div class="muted" style="font-size:12px;margin-top:4px">${[r.brand, eanNote, r.price != null ? EUR(r.price) : ""].filter(Boolean).join(" · ")}</div></div></div>
+      <h4 style="margin:14px 0 6px">🏪 ${t("Which shops should ARGUS watch?")}</h4>
+      <p class="muted" style="font-size:13px;margin:0 0 6px">${t("Suggested for {category}: the shops that sell this kind of product. Tick or untick as you like; shops ARGUS discovers later through comparison sites are added by themselves.", { category: `<b>${esc(this.catName(r.category))}</b>` })}</p>
+      <div class="pshops">${sug.map(shop).join("") || `<span class="muted">${t("no shops yet")}</span>`}</div>
+      ${rest.length ? `<details style="margin-top:6px"><summary class="muted" style="cursor:pointer">${t("Other shops ({n})", { n: rest.length })}</summary><div class="pshops" style="margin-top:6px">${rest.map(shop).join("")}</div></details>` : ""}
+      <h4 style="margin:14px 0 6px">🔔 ${t("When do you want to hear about it?")}</h4>
+      <div class="form" style="margin:0"><label>${t("Max. price")} (€)<input id="a_target" type="text" inputmode="decimal" autocomplete="off" data-money placeholder="${t("optional: you get a message at or below it")}"></label>
+        <div style="grid-column:span 2"><div class="muted" style="font-size:13px;margin-bottom:4px">${t("Tell me when it is suddenly cheaper than usual")}</div><div class="walerts">${steps.map((p) => `<button class="walert ${pv.alert === p ? "on" : ""}" data-aalert="${p}" style="--c:${alertTone(p)}" type="button">−${p}%</button>`).join("")}</div></div>
         <label>${t("Priority")}<select id="a_prio">${[0, 1, 2, 3].map((p) => `<option value="${p}">${p ? "★".repeat(p) : "–"}</option>`).join("")}</select></label></div>
-      <button class="btn" id="a_go">＋ ${t("Add & find at other shops")}</button> <span id="a_hint" class="muted" style="font-size:13px"></span>
-      <div id="a_result"></div></div>
-      <div class="panel"><h3>🏪 ${t("Where does ARGUS look?")}</h3><p>${t("A product is only looked up at the shops that sell its category. The shops come from your shop settings (Manage → Shops & jobs).")}</p>
-        <table class="tbl">${Object.entries(cats).map(([k, v]) => `<tr><td style="white-space:nowrap">${CATEGORY_ICONS[k] || ""} <b>${esc(t(v))}</b></td><td>${(byCat[k] || []).length ? (byCat[k] || []).map(esc).join(", ") : `<span class="muted">${t("no shops yet")}</span>`}</td></tr>`).join("")}</table></div>`;
+      <div style="margin-top:12px"><button class="btn" id="a_go">＋ ${t("Add and watch")}</button> <button class="btn ghost" id="a_reset" type="button">${t("Start again")}</button></div></div>`;
+  }
+  bindAdd(root, $) {
+    const s = this.state, qi = $("a_q"); if (!qi) return;
+    const kind = (v) => (/^https?:\/\//i.test(v) ? "url" : /^\d[\d\s-]{6,16}\d$/.test(v) ? "ean" : v ? "name" : "");
+    const showKind = () => { const k = kind(qi.value.trim()); $("a_kind").textContent = { url: "🔗 " + t("a product page"), ean: "▥ " + t("a barcode: ARGUS looks up the name"), name: "🔤 " + t("a name: ARGUS looks up the barcode") }[k] || ""; };
+    qi.addEventListener("input", showKind); showKind();
+    const look = () => {
+      const v = qi.value.trim(), k = kind(v);
+      if (!k) return this.toast(t("Enter the address of a product page, or at least a name."), "err");
+      this.busy($("a_look"), t("Looking it up… (a few shops and comparison sites)"), async () => {
+        const res = await this._hass.callWS({ type: "argus/product/preview", [k]: k === "ean" ? v.replace(/\D/g, "") : v });
+        s.addPreview = { q: v, res, chosen: null, alert: null }; s.addPrefill = null;
+        $("a_preview").innerHTML = this.previewHtml(res); this.bindPreview(root, $);
+      });
+    };
+    $("a_look").addEventListener("click", look);
+    qi.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); look(); } });
+    if (s.addPreview && s.addPreview.res) this.bindPreview(root, $);
+    if (s.addPrefill && !s.addPreview) setTimeout(look, 50);
+  }
+  bindPreview(root, $) {
+    const s = this.state, pv = s.addPreview;
+    root.querySelectorAll(".a_shop").forEach((c) => c.addEventListener("change", () => { c.checked ? pv.chosen.add(c.value) : pv.chosen.delete(c.value); c.closest(".pshop").classList.toggle("on", c.checked); }));
+    root.querySelectorAll("[data-aalert]").forEach((b) => b.addEventListener("click", () => { const p = +b.dataset.aalert; pv.alert = pv.alert === p ? null : p; root.querySelectorAll("[data-aalert]").forEach((x) => x.classList.toggle("on", +x.dataset.aalert === pv.alert)); }));
+    $("a_cat").addEventListener("change", (e) => {          // another kind of product: other suggested shops
+      const c = e.target.value, sc = s.data.shop_categories || {};
+      pv.res.category = c; pv.res.shops.forEach((x) => { const cs = sc[x.id] || []; x.suggested = x.found || !cs.length || cs.includes(c) || c === "other"; });
+      pv.chosen = null; $("a_preview").innerHTML = this.previewHtml(pv.res); this.bindPreview(root, $);
+    });
+    $("a_reset").addEventListener("click", () => { s.addPreview = null; this.renderContent(); });
+    $("a_go").addEventListener("click", () => {
+      const v = (id) => ($(id) || {}).value?.trim?.() || "", r = pv.res;
+      const d = { type: "argus/add_product", url: r.url || "", name: v("a_name") || r.name || "", category: v("a_cat"), shops: [...pv.chosen] };
+      if (v("a_ean")) d.ean = v("a_ean").replace(/\D/g, "");
+      if (r.brand) d.brand = r.brand; if (r.mpn) d.mpn = r.mpn; if (r.image) d.image = r.image;
+      if (v("a_target")) { const x = +money(v("a_target")); if (!(x > 0)) return this.toast(t("Invalid price"), "err"); d.target_price = x; }
+      if (pv.alert) d.alert_pct = pv.alert;
+      if (+v("a_prio")) d.priority = +v("a_prio");
+      if (!d.shops.length) return this.toast(t("Choose at least one shop."), "err");
+      if (!d.name) delete d.name;
+      this.busy($("a_go"), t("Adding…"), async () => {
+        const res = await this._hass.callWS(d);
+        s.addPreview = null; await this.load(); this.toast(t("Added: {name}", { name: (res.name || "").slice(0, 60) }), "ok");
+        const box = this.shadowRoot.getElementById("a_result"); if (box) { box.innerHTML = this.addedHtml(res); this.bindCards(box); }
+        const pvb = this.shadowRoot.getElementById("a_preview"); if (pvb) pvb.innerHTML = ""; const q = this.shadowRoot.getElementById("a_q"); if (q) q.value = "";
+      });
+    });
   }
   vImport() {
     const imp = this.state.imp, a = imp.analysis;
@@ -697,7 +843,7 @@ class ArgusPanel extends HTMLElement {
     const p = r.product || {};
     return `<div class="prefill item" style="margin-top:12px;display:flex;gap:12px;align-items:center"><div class="img" style="width:72px;height:72px;display:grid;place-items:center">${this.img(p)}</div>
       <div style="flex:1"><div class="muted" style="font-size:12px">${r.existing ? t("Already tracked: this shop was added to it") : t("Added: ARGUS is looking it up at the other shops")}</div>
-        <b>${esc(p.name || "")}</b><div class="muted" style="font-size:13px">${[p.brand, this.catName(p.category), p.ean ? t("barcode {ean}", { ean: p.ean }) : t("no barcode on the page: matched by title")].filter(Boolean).map(esc).join(" · ")}${r.price != null ? ` · <b>${EUR(r.price)}</b>` : ""}</div>
+        <b>${esc(p.name || "")}</b><div class="muted" style="font-size:13px">${[p.brand, this.catName(p.category), p.ean ? t("barcode {ean}", { ean: p.ean }) : t("no barcode yet: matched by title")].filter(Boolean).map(esc).join(" · ")}${r.price != null ? ` · <b>${EUR(r.price)}</b>` : ""}</div>
         ${r.error ? `<div class="err" style="font-size:12px">⚠ ${esc(tx(r.error))}</div>` : ""}</div><button class="btn sm" data-set="${esc(r.id)}">${t("Open product")}</button></div>`;
   }
 
@@ -792,28 +938,9 @@ class ArgusPanel extends HTMLElement {
     on(".shop[data-shop]", "keydown", (e) => { if (e.key === "Enter" && e.target === e.currentTarget) this.openShop(e.currentTarget.dataset.shop); });
     on("[data-range]", "click", (e) => { s.range = +e.currentTarget.dataset.range; this.persist(); this.renderContent(); });
     const thr = $("thr"); if (thr) { thr.addEventListener("input", (e) => { const v = $("thrv"); if (v) v.textContent = e.target.value + "%"; }); thr.addEventListener("change", (e) => { s.threshold = +e.target.value; this.render(); }); }
-    // add by address
-    const url = $("a_url"); if (url) url.addEventListener("input", () => {
-      const v = url.value.trim(), h = $("a_hint");
-      if (!v) { h.textContent = ""; return; }
-      let host = ""; try { host = new URL(v).hostname.replace(/^www\./, ""); } catch (e) { h.innerHTML = `<span class="err">${t("That is not a web address")}</span>`; return; }
-      const known = Object.keys(this.state.data.retailers).some((rid) => (this.state.settings?.shops || []).some((x) => x.id === rid && x.domain && (host === x.domain || host.endsWith("." + x.domain))));
-      h.innerHTML = this.state.settings && !known ? `<span style="color:#9a6a00">${t("{host} is not one of your shops yet: add it under Manage → Shops & jobs first.", { host: esc(host) })}</span>` : "";
-    });
-    const add = $("a_go"); if (add) add.addEventListener("click", () => {
-      const v = (id) => (root.querySelector("#" + id) || {}).value?.trim?.() || "";
-      const d = { type: "argus/add_product", url: v("a_url") };
-      for (const [k, id] of [["name", "a_name"], ["ean", "a_ean"], ["brand", "a_brand"], ["mpn", "a_mpn"], ["category", "a_cat"]]) if (v(id)) d[k] = v(id);
-      for (const [k, id] of [["ref_price", "a_ref"], ["target_price", "a_target"]]) if (v(id)) { const x = +money(v(id)); if (!(x > 0)) return this.toast(t("{field}: invalid number", { field: k }), "err"); d[k] = x; }
-      if (+v("a_prio")) d.priority = +v("a_prio");
-      if (!d.url && !d.name && !d.ean) return this.toast(t("Enter the address of a product page, or at least a name."), "err");
-      this.busy(add, t("Reading the page…"), async () => {
-        const r = await this._hass.callWS(d);
-        s.addPrefill = null; await this.load(); this.toast(t("Added: {name}", { name: (r.name || "").slice(0, 60) }), "ok");
-        const box = this.shadowRoot.getElementById("a_result"); if (box) { box.innerHTML = this.addedHtml(r); this.bindCards(box); }
-        ["a_url", "a_name", "a_ean", "a_brand", "a_mpn", "a_target", "a_ref"].forEach((id) => { const el = this.shadowRoot.getElementById(id); if (el) el.value = ""; });
-      });
-    });
+    // add: address, name or barcode → look it up → choose shops → add
+    this.bindAdd(root, $);
+    this.bindWatch(root);
     // header-style action buttons inside content (Shops & jobs)
     root.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => this.startJob(b.dataset.act, b)));
     // shop pause: resume one ("") = all
@@ -905,6 +1032,7 @@ class ArgusPanel extends HTMLElement {
       const saved = JSON.parse(localStorage.getItem("argus_ui") || "{}");
       if (SECTIONS[saved.section]) this.state.section = saved.section;
       if ([0, 30, 90, 365].includes(saved.range)) this.state.range = saved.range;
+      if (["list", "cards"].includes(saved.view)) this.state.view = saved.view;
       for (const [k, v] of Object.entries(saved.sub || {})) if (SECTIONS[k] && SECTIONS[k].subs.some(([x]) => x === v)) this.state.sub[k] = v;
     } catch (e) { /* storage unavailable */ }
     this.resetFilters();
@@ -1037,7 +1165,7 @@ class ArgusPanel extends HTMLElement {
   // refuse to create the panel (NotSupportedError)
   connectedCallback() { if (!this._colored) { this._colored = true; this.applyColors(this.colorTheme()); } }
   applyColors(key) { if (key && key !== "ha") this.dataset.colors = key; else delete this.dataset.colors; }
-  persist() { try { localStorage.setItem("argus_ui", JSON.stringify({ section: this.state.section, sub: this.state.sub, cview: this.state.cview, range: this.state.range })); } catch (e) { /* ignore */ } }
+  persist() { try { localStorage.setItem("argus_ui", JSON.stringify({ section: this.state.section, sub: this.state.sub, cview: this.state.cview, range: this.state.range, view: this.state.view })); } catch (e) { /* ignore */ } }
 
   // ---------------------------------------------------------------- data
   // ---------------------------------------------------------------- data
@@ -1045,7 +1173,7 @@ class ArgusPanel extends HTMLElement {
     try {
       const [d, c] = await Promise.all([this._hass.callWS({ type: "argus/overview" }), this._hass.callWS({ type: "argus/collection" })]);
       if (await loadLanguage(d.language, d.version)) { animate = true; this.shadowRoot.host.setAttribute("lang", LANG); }
-      this.state.data = d; this.state.coll = c; this.state.err = null; this.state.mAt = Date.now() / 1000;
+      this.state.data = d; MARKS = d.marks || {}; this.state.coll = c; this.state.err = null; this.state.mAt = Date.now() / 1000;
       if (this.state.threshold == null) this.state.threshold = d.threshold;
       this.state.job = d.job; if (d.job && d.job.running) this.pollJob();
       if ((d.first_checks || []).length) this.followFirstChecks();
@@ -1410,7 +1538,7 @@ class ArgusPanel extends HTMLElement {
   // only the results area (keeps focus in the search box while typing)
   renderResults() {
     const el = this.shadowRoot.getElementById("results"); if (!el) return this.renderContent();
-    const fn = el.dataset.fn; el.innerHTML = this[fn](); el.className = ""; this.bindCards(el); this.hookCharts(el);
+    const fn = el.dataset.fn; el.innerHTML = this[fn](); el.className = ""; this.bindCards(el); this.bindWatch(el); this.hookCharts(el);
   }
 
   // ---------------------------------------------------------------- shared pieces
@@ -1914,7 +2042,9 @@ class ArgusPanel extends HTMLElement {
       <td style="min-width:300px"><div style="display:flex;gap:4px"><input class="s_search" value="${esc(x.search || "")}" placeholder="${esc(x.default_search || "https://…{query}")}" style="flex:1;min-width:220px;font-size:12px">${x.default_search ? `<button class="btn ghost sm s_reset" title="${t("Back to the default: {url}", { url: esc(x.default_search) })}" ${x.search === x.default_search ? "hidden" : ""}>↺</button>` : ""}</div><div class="s_prev muted" style="font-size:11px;margin-top:3px">${this.searchPreview(x.search || x.default_search)}</div></td>
       <td>${x.builtin ? "" : `<button class="btn danger sm s_del" title="${t("Remove shop")}">🗑</button>`}</td></tr>`).join("");
     const langs = st.languages || {}, mode = d.mode, dev = st.dev || {};
-    return `${this.colorsPanel()}<div class="panel"><h3>🌐 ${t("Language")}</h3><div class="form" style="max-width:520px"><label>${t("Language of the panel, notifications and userscript")}<select id="o_lang"><option value="auto" ${st.language === "auto" ? "selected" : ""}>${t("Automatic (Home Assistant language)")}</option>${Object.entries(langs).map(([k, l]) => `<option value="${k}" ${st.language === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label></div></div>
+    return `${this.colorsPanel()}<div class="panel"><h3>🌐 ${t("Language")}</h3><div class="form" style="max-width:520px"><label>${t("Language of the panel, notifications and userscript")}<select id="o_lang"><option value="auto" ${st.language === "auto" ? "selected" : ""}>${t("Automatic (Home Assistant language)")}</option>${Object.entries(langs).map(([k, l]) => `<option value="${k}" ${st.language === k ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
+        <label>${t("Country")}<select id="o_country">${[["be", "🇧🇪 " + t("Belgium")], ["nl", "🇳🇱 " + t("Netherlands")]].map(([k, l]) => `<option value="${k}" ${(st.country || "be") === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+          <span class="hint muted">${t("Shops and comparison sites use the addresses of this country (bol.com/be or /nl, kieskeurig.be or .nl, …); shops that only exist in the other country are left out.")}</span></label></div></div>
       <div class="panel"><h3>🔔 ${t("Notifications")}</h3><p class="muted" style="font-size:13px">${t("What counts as a deal is set under Prices → Deal settings.")} <a data-goto="prices/dset" style="cursor:pointer">🏷️ ${t("Deal settings")} →</a></p>
         <div class="form"><label>${t("Notifications")}<a class="btn ghost sm" data-goto="manage/notify" style="cursor:pointer;margin-top:4px;align-self:flex-start">🔔 ${t("Go to Notifications")}</a><input id="o_notify" type="hidden" value="${esc(st.notify_service)}"></label>
         <label>${t("Daily digest at")}<input id="o_digest" type="time" value="${esc(st.digest_time)}"></label></div></div>
@@ -1945,6 +2075,10 @@ class ArgusPanel extends HTMLElement {
         <label style="grid-column:span 2">${t("Search URL")}<input id="n_search" placeholder="https://www.example-shop.be/search?q=ARGUSTEST"><div class="hint muted" id="n_search_prev"></div></label>
         <div style="grid-column:1/-1"><div class="muted" style="font-size:13px;margin-bottom:4px">${t("Which categories does it sell?")}</div><div class="chips">${Object.entries(cats).map(([k, v]) => `<label class="chk"><input type="checkbox" class="n_cat" value="${esc(k)}" checked> ${CATEGORY_ICONS[k] || ""} ${esc(t(v))}</label>`).join(" ")}</div></div></div>
         <p style="font-size:12px">${t("Prices are read from the standard product data (JSON-LD/meta) that most web shops have.")}</p><button class="btn ghost" id="n_add">＋ ${t("Add to the list")}</button></div>
+      ${(st.finders || []).length ? `<div class="panel"><h3>🧭 ${t("Finders")}</h3>
+        <p>${t("Besides the shops' own search, ARGUS finds a product's page through a web search for “brand name shop” (the first results on the shop's domain) and through price-comparison sites, whose sponsored links lead to the shops too. Whatever they return is only a suggestion: the shop's own page is always fetched and checked (barcode, model number, title) before it is linked, and prices are always read from the shop.")}</p>
+        <div class="tscroll"><table class="tbl"><tr><th>${t("Finder")}</th><th>${t("Kind")}</th><th>${t("Status")}</th></tr>${(st.finders || []).map((x) => `<tr><td><label class="chk" style="display:flex;gap:8px;align-items:center"><input type="checkbox" class="f_on" value="${esc(x.id)}" ${x.enabled ? "checked" : ""}> <b>${esc(x.name)}</b></label><div class="muted" style="font-size:12px">${esc(x.domain)}</div></td>
+          <td>${x.kind === "websearch" ? t("web search") : t("price comparison")}</td><td>${x.paused_hours > 0 ? `<span class="lk suspect">${t("paused {time}", { time: dur(x.paused_hours * 3600) })}</span>` : `<span class="lk ok">${t("active")}</span>`}</td></tr>`).join("")}</table></div></div>` : ""}
       <div class="panel"><h3>🚫 ${t("Product filter")}</h3>
         <p>${t("A page whose title contains one of these words is never taken as the same product (e.g. a case or a spare part for your product): it is skipped in shop searches and the link check. Words that are in your product's own name are always allowed.")}</p>
         <details style="margin:0 0 10px"><summary class="muted" style="cursor:pointer">${t("Built-in words ({n})", { n: (st.builtin_words || []).length })}</summary>
@@ -2118,7 +2252,7 @@ class ArgusPanel extends HTMLElement {
           const j = JSON.parse(await f.text());
           if (!j || !["argus-shop-settings"].includes(j.format) || !Array.isArray(j.shops)) throw new Error("format");
           payload = j; q("ss_name").textContent = f.name;
-          q("ss_info").innerHTML = `<p><b>${t("{n} shops", { n: j.shops.length })}:</b> ${j.shops.map((x) => esc(x.name || x.id)).join(", ")}</p>`;
+          q("ss_info").innerHTML = `<p><b>${t("{n} shops", { n: j.shops.length })}:</b> ${j.shops.map((x) => esc(x.name || x.id)).join(", ")}${(j.finders || []).length ? `<br><b>${t("{n} finders", { n: j.finders.length })}:</b> ${j.finders.map((x) => esc(x.name || x.id)).join(", ")}` : ""}</p>`;
         } catch (e) { payload = null; q("ss_info").innerHTML = ""; this.toast(t("This is not a shop settings file for this integration."), "err"); }
         sync();
       };
@@ -2228,11 +2362,12 @@ class ArgusPanel extends HTMLElement {
         ...(d.mode === "times" ? { refresh_times: $("o_times").value } : {}), use_impersonation: $("o_imp").checked,
         retailers: d.shops.filter((x) => x.enabled).map((x) => x.id), no_autopause: d.shops.filter((x) => !x.autopause).map((x) => x.id),
         custom_shops: d.custom, shop_search: Object.fromEntries(d.shops.filter((x) => x.builtin).map((x) => [x.id, x.search === x.default_search ? "" : this.toTemplate(x.search || "")])),
-        language: $("o_lang").value,
+        language: $("o_lang").value, country: $("o_country").value,
       };
       // a number field some phone keyboards leave empty: keep the saved number instead of 0
       const tkn = (k) => { const v = parseInt(String($("o_tkn_" + k).value).replace(/\D/g, ""), 10); return Number.isFinite(v) ? Math.max(0, Math.min(50, v)) : ((st.ticker || {})["max_" + k] ?? 3); };
       f.ticker = { ...Object.fromEntries(["drops", "deals", "news"].flatMap((k) => [[k, $("o_tk_" + k).checked], ["max_" + k, tkn(k)]])), shuffle: $("o_tk_shuffle").checked };
+      if (st.finders && st.finders.length) f.finders = [...root.querySelectorAll(".f_on")].filter((c) => c.checked).map((c) => c.value);
       f.browser_relay = $("o_relay").checked; f.relay_hours = +$("o_relayh").value || 6;
       f.block_words = lines($("o_block").value); f.allow_words = lines($("o_allow").value);
       if (!f.retailers.length) return this.toast(t("Switch on at least one shop"), "err");

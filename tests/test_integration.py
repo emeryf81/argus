@@ -443,3 +443,184 @@ async def test_history_is_capped(hass: HomeAssistant, entry, world):
     o = {"history": [[float(i), 1.0 + i] for i in range(MAX_HISTORY)]}
     record_price(o, 5.5, now=float(MAX_HISTORY + 10) * 86400)
     assert len(o["history"]) == MAX_HISTORY and o["history"][-1][1] == 5.5
+
+
+async def test_discovery_via_web_search_and_price_comparison_sites(hass: HomeAssistant, entry, world):
+    """Shops whose own search finds nothing are found through a web search (first result on the shop's domain) and through
+    the sponsored/organic links of comparison sites, whose redirect addresses are unpacked; every candidate is verified."""
+    fnac = "https://www.nl.fnac.be/Sony-WH1000XM5B-Draadloze-ruiswerende-Bluetooth-Hoofdtelefoon-Zwart/a16864769"
+    world.pages.update({
+        # a web search: a sponsored result, an accessory and the shop's page
+        "html.duckduckgo.com/html/": (200, "<html><body>"
+            '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.sony.be%2Fnl%2Fp%2F1">Sony officieel</a>'
+            '<a class="result__a" href="//duckduckgo.com/l/?uddg=' + fnac.replace(":", "%3A").replace("/", "%2F").replace("a16864769", "x1") + '">Hoes voor Sony WH-1000XM5 bij Fnac</a>'
+            f'<a class="result__a" href="//duckduckgo.com/l/?uddg={fnac.replace(":", "%3A").replace("/", "%2F")}">Sony WH-1000XM5 draadloze koptelefoon - Fnac</a>'
+            "</body></html>"),
+        "fnac.be/Sony-WH1000XM5B": (200, page("Sony WH1000XM5B Draadloze ruiswerende Bluetooth Hoofdtelefoon Zwart", 289.0, EAN)),
+        # a comparison site: its ad for Vanden Borre hides the shop's address in a redirect parameter
+        "kelkoo.be/search": (200, "<html><body>"
+            '<a href="https://www.kelkoo.be/go?url=https%3A%2F%2Fwww.vandenborre.be%2Fnl%2Fp%2Fsony-wh-1000xm5%2F77%2F%3Futm_source%3Dkelkoo">Sony WH-1000XM5 - Vanden Borre</a>'
+            '<a href="https://www.kelkoo.be/go?url=https%3A%2F%2Fwww.vandenborre.be%2Fnl%2Fp%2Fhoesje-sony-wh-1000xm5%2F78%2F">Hoesje Sony WH-1000XM5</a>'
+            "</body></html>"),
+        "vandenborre.be/nl/p/sony-wh-1000xm5/77/": (200, page("Sony WH-1000XM5 draadloze koptelefoon", 315.0, EAN)),
+    })
+    world.pages.pop("vandenborre.be/nl/search?q=" + EAN)
+    world.pages.pop("vandenborre.be/nl/search?q=Sony")           # the shop's own search finds nothing
+    coord = await setup(hass, entry)
+    pid = (await coord.add_product("https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/", discover=False))["id"]
+    res = await coord.discover_product(pid)
+    offers = coord.store["offers"][pid]
+    assert res["found"] == 3
+    assert set(offers) == {"bol", "krefel", "vandenborre", "fnac_be"}
+    assert offers["fnac_be"]["found_via"] == "web" and offers["fnac_be"]["url"] == fnac
+    assert offers["vandenborre"]["found_via"] == "agg"
+    assert offers["vandenborre"]["url"] == "https://www.vandenborre.be/nl/p/sony-wh-1000xm5/77/"      # tracking parameter gone
+    assert not [h for h in world.hits if "hoesje" in h or "sony.be" in h or "x1" in h]                    # accessories / other domains never fetched
+    assert len([h for h in world.hits if "kelkoo.be/search" in h]) == 1                                   # one comparison search serves all shops
+
+
+def test_extract_unpacks_redirects_and_ignores_search_pages_and_accessories():
+    from custom_components.argus.finders import extract
+
+    page_ = ('<a href="/url?q=https://www.mediamarkt.be/nl/product/_sony-wh-1000xm5-123.html&sa=U">Sony WH-1000XM5 | MediaMarkt</a>'
+             '<a href="https://www.googleadservices.com/pagead/aclk?adurl=https%3A%2F%2Fwww.krefel.be%2Fnl%2Fp%2Fsony-wh-1000xm5%2F5">Sony WH-1000XM5 Krëfel</a>'
+             '<a href="https://www.mediamarkt.be/nl/search.html?query=sony">zoeken</a>'
+             '<a href="https://www.krefel.be/nl/p/hoes-sony-wh-1000xm5/6">Hoes</a>'
+             '<script>var u = "https:\\/\\/www.bol.com\\/be\\/nl\\/p\\/sony-wh-1000xm5\\/9300001\\/";</script>')
+    got = extract(page_, {"mediamarkt_be": "mediamarkt.be", "krefel": "krefel.be", "bol": "bol.com"},
+                  {"name": "Sony WH-1000XM5", "brand": "Sony"})
+    assert [c["url"] for c in got["mediamarkt_be"]] == ["https://www.mediamarkt.be/nl/product/_sony-wh-1000xm5-123.html"]
+    assert [c["url"] for c in got["krefel"]] == ["https://www.krefel.be/nl/p/sony-wh-1000xm5/5"]
+    assert [c["url"] for c in got["bol"]] == ["https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/"]
+
+
+KELKOO = ("<html><body>"
+          '<div class="offer"><a href="https://www.kelkoo.be/go?url=https%3A%2F%2Fwww.bol.com%2Fbe%2Fnl%2Fp%2Fsony-wh-1000xm5%2F9300001%2F">'
+          "Sony WH-1000XM5 draadloze koptelefoon</a> <span>bol</span> <span>€ 279,00</span> <small>Door Shoparize</small></div>"
+          '<div class="offer"><a href="https://www.kelkoo.be/go?url=https%3A%2F%2Fwww.exellent.be%2Fnl%2Fsony-wh-1000xm5-zwart%2F123">'
+          "Sony WH-1000XM5 draadloze koptelefoon zwart</a> <span>Exellent</span> <span>269,95 €</span> <small>By Producthero</small></div>"
+          "</body></html>")
+
+
+async def test_comparison_site_prices_with_service_mark_and_new_shops(hass: HomeAssistant, entry, world):
+    """bol can't be read (blocked): the price the comparison site shows for bol is used, marked with the service that
+    shows it (ⓢ Shoparize); a shop that is not in the list yet (Exellent, via Producthero) is added with its price."""
+    world.pages["kelkoo.be/search"] = (200, KELKOO)
+    coord = await setup(hass, entry)
+    pid = (await coord.add_product("https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/", discover=False))["id"]
+    await coord.discover_product(pid)
+    world.pages["bol.com/be/nl/p/sony-wh-1000xm5/9300001/"] = (403, "blocked")
+    world.pages["exellent.be"] = (403, "blocked")
+    coord.fetcher.reset_cooldowns()
+    await coord.refresh_product(pid, list(coord.retailers), force=True)
+    offers = coord.store["offers"][pid]
+    assert offers["bol"]["last_price"] == 279.0 and offers["bol"]["last_via"] == "css:shoparize"
+    assert "a_exellent_be" in coord.store["auto_shops"] and "a_exellent_be" in coord.retailers
+    assert offers["a_exellent_be"]["last_price"] == 269.95 and offers["a_exellent_be"]["last_via"] == "css:producthero"
+    assert offers["a_exellent_be"]["url"] == "https://www.exellent.be/nl/sony-wh-1000xm5-zwart/123"
+    status = coord.compute()["statuses"][pid]
+    assert status["best_retailer"] == "a_exellent_be" and status["best_price"] == 269.95
+
+
+async def test_add_by_name_finds_the_barcode_and_by_barcode_finds_the_name(hass: HomeAssistant, entry, world):
+    world.pages["kelkoo.be/search?query=Sony+WH-1000XM5"] = (200, search(
+        ("https://www.krefel.be/nl/p/sony-wh-1000xm5-zwart/55/", "Sony WH-1000XM5 koptelefoon zwart"),
+        ("https://www.vandenborre.be/nl/p/sony-wh-1000xm5/77/", "Sony WH-1000XM5 draadloze koptelefoon")))
+    world.pages["vandenborre.be/nl/p/sony-wh-1000xm5/77/"] = (200, page("Sony WH-1000XM5 draadloze koptelefoon", 315.0, EAN))
+    coord = await setup(hass, entry)
+    prev = await coord.preview_product(name="Sony WH-1000XM5")
+    assert prev["ean"] == EAN and prev["ean_sure"] is True                     # two pages agree on the barcode
+    assert prev["category"] == "electronics"
+    sugg = {s["id"]: s["suggested"] for s in prev["shops"]}
+    assert sugg["krefel"] and sugg["vandenborre"]
+    world.pages["kelkoo.be/search?query=" + EAN] = (200, search(("https://www.krefel.be/nl/p/sony-wh-1000xm5-zwart/55/", "x")))
+    by_ean = await coord.preview_product(ean=EAN)
+    assert by_ean["name"].startswith("Sony WH-1000XM5") and by_ean["ean"] == EAN
+    res = await coord.add_product(None, name=prev["name"], ean=prev["ean"], shops=["krefel", "vandenborre"], alert_pct=20, discover=False)
+    p = coord.store["products"][res["id"]]
+    assert p["shops"] == ["krefel", "vandenborre"] and p["alert_pct"] == 20
+    assert set(coord.store["offers"][res["id"]]) >= {"krefel"}                   # the pages that proved it are linked right away
+    assert coord.shops_for(res["id"]) == ["krefel", "vandenborre"]              # only the shops you chose
+
+
+def test_deal_alert_fires_when_the_product_is_suddenly_cheaper():
+    from custom_components.argus.notifications import product_triggers
+
+    rule = {"triggers": ["my_alert"], "params": {}, "shops": []}
+    before = {"best_price": 300.0, "discount_avg": 5.0, "alert_pct": 20}
+    after = {"best_price": 230.0, "discount_avg": 23.0, "alert_pct": 20}
+    assert [t for t, _ in product_triggers(rule, before, after)] == ["my_alert"]
+    assert product_triggers(rule, before, {**after, "discount_avg": 15.0}) == []
+    assert product_triggers(rule, after, after) == []                             # only once, when it crosses the line
+
+
+def test_country_decides_addresses_and_shops():
+    from custom_components.argus import shops
+    from tests.conftest import EXAMPLE
+
+    nl = shops.validate_settings(EXAMPLE, "nl")
+    be = shops.validate_settings(EXAMPLE, "be")
+    by = lambda data, part: {x["id"]: x for x in data[part]}  # noqa: E731
+    assert by(be, "shops")["bol"]["search"] == "https://www.bol.com/be/nl/s/?searchtext={query}"
+    assert by(nl, "shops")["bol"]["search"] == "https://www.bol.com/nl/nl/s/?searchtext={query}"
+    assert by(be, "finders")["kieskeurig"]["search"].startswith("https://www.kieskeurig.be/nl/")
+    assert by(nl, "finders")["kieskeurig"]["domain"] == "kieskeurig.nl" and by(nl, "finders")["beslist"]["domain"] == "beslist.nl"
+    assert "krefel" in by(be, "shops") and "krefel" not in by(nl, "shops")          # a Belgian shop only in Belgium
+    assert by(nl, "shops")["coolblue_be"]["domain"] == "coolblue.nl"
+    kept = shops.validate_settings(EXAMPLE)                                           # stored as written, for both countries
+    assert isinstance(next(s for s in kept["shops"] if s["id"] == "coolblue_be")["domain"], dict)
+
+
+TWEAKERS_SEARCH = ('<html><body><a href="/pricewatch/1858494/sony-wh-1000xm5-zwart.html">Sony WH-1000XM5 Zwart</a>'
+                   '<a href="/pricewatch/1858495/sony-wh-1000xm5-oorkussens.html">Oorkussens voor Sony WH-1000XM5</a></body></html>')
+TWEAKERS_PAGE = ('<html><body><h1>Sony WH-1000XM5 Zwart</h1><table>'
+                 '<tr><td><img src="/logo/1.png" alt="Vanden Borre"></td><td>€ 284,00</td><td><a href="https://tweakers.net/clickout/1/">Naar winkel</a></td></tr>'
+                 '<tr><td><img src="/logo/2.png" alt="Krëfel"></td><td>€ 295,00</td><td><a href="https://tweakers.net/clickout/2/">Naar winkel</a></td></tr>'
+                 '<tr><td><img src="/logo/3.png" alt="Onbekende Winkel"></td><td>€ 199,00</td><td><a href="https://tweakers.net/clickout/3/">Naar winkel</a></td></tr>'
+                 '</table></body></html>')
+
+
+async def test_tweakers_style_clickouts_give_prices_per_shop_name(hass: HomeAssistant, entry, world):
+    """Tweakers, Kieskeurig and Beslist link to the shop through their own site: the product's page there is opened and
+    each shop is recognised by its name or logo next to the price."""
+    world.pages["tweakers.net/pricewatch/zoeken/"] = (200, TWEAKERS_SEARCH)
+    world.pages["tweakers.net/pricewatch/1858494/"] = (200, TWEAKERS_PAGE)
+    coord = await setup(hass, entry)
+    pid = (await coord.add_product("https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/", discover=False,
+                                   shops=["bol", "krefel", "vandenborre"]))["id"]
+    await coord.finder_round(pid, force=True)
+    offers = coord.store["offers"][pid]
+    assert offers["vandenborre"]["last_price"] == 284.0 and offers["vandenborre"]["last_via"] == "css:tweakers"
+    assert offers["vandenborre"].get("url") is None                                  # price known, page not yet
+    assert offers["krefel"]["last_price"] == 295.0
+    assert not [h for h in world.hits if "oorkussens" in h or "clickout" in h]       # accessories and click-outs never opened
+
+
+def test_comparison_site_links_to_the_local_network_never_become_shops():
+    from custom_components.argus.finders import offers, public_host
+
+    page_ = ("<html><body>"
+             '<a href="https://192.168.1.1/admin/sony-wh-1000xm5">Sony WH-1000XM5</a> € 99,00'
+             '<a href="https://router.local/p/sony-wh-1000xm5">Sony WH-1000XM5</a> € 98,00'
+             '<a href="http://shop.example-store.be/p/sony-wh-1000xm5">Sony WH-1000XM5</a> € 97,00'
+             '<a href="https://www.exellent.be/nl/sony-wh-1000xm5/1">Sony WH-1000XM5</a> € 269,95</body></html>')
+    _by_shop, others = offers(page_, {}, {"name": "Sony WH-1000XM5", "brand": "Sony"})
+    assert [o["domain"] for o in others] == ["exellent.be"]
+    assert not public_host("10.0.0.5") and not public_host("nas.lan") and not public_host("localhost") and public_host("coolblue.be")
+
+
+async def test_auto_shops_check_the_address_and_stay_in_their_country(hass):
+    from custom_components.argus import shops
+
+    with pytest.raises(ValueError, match="not a public address"):
+        await Fetcher._check_public("https://127.0.0.1/p/1")
+    try:
+        shops.STATE["country"] = "nl"
+        shops.set_auto_shops([{"id": "a_exellent_be", "name": "Exellent", "domain": "exellent.be", "country": "be"},
+                              {"id": "a_mobiel_nl", "name": "Mobiel", "domain": "mobiel.nl", "country": "nl"},
+                              {"id": "a_nas_lan", "name": "NAS", "domain": "nas.lan", "country": "nl"}])
+        assert "a_mobiel_nl" in shops.RETAILERS
+        assert "a_exellent_be" not in shops.RETAILERS and "a_nas_lan" not in shops.RETAILERS
+    finally:
+        shops.STATE["country"] = "be"
+        shops.set_auto_shops([])

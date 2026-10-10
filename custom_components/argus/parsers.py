@@ -471,7 +471,7 @@ ACCESSORY_RE = re.compile(
     r"tas|bag|sleeve|pouch|strap|bandje|polsband|armband|"
     r"sticker|stickers|aufkleber|skin|poster|"
     r"vervang\w*|replacement|spare|ersatz\w*|reserve ?onderdel\w*|onderdelen|refill|navulling|"
-    r"batterij|batterijen|battery|accu|"
+    r"batterij|batterijen|battery|accu|oorkussen\w*|ear ?pads?|ear ?cushions?|"
     r"handleiding|manual|instructions only|anleitung|"
     r"compatibel|compatible|kompatibel|geschikt\s+(?:voor|met|bij)|suitable\s+for|passend\s+(?:f[uü]r|zu|bei)|"
     r"voor\s+(?:de\s+)?[a-z]\w+ ?\d|for\s+[a-z]\w+ ?\d)\b", re.I)

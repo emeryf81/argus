@@ -188,7 +188,7 @@ def compute_status(
         "discount_ref": None, "discount_avg": None,
         "high_discount": False, "history_days": 0, "offers_live": 0,
         "change_7d": None, "change_30d": None, "shop_spread": None, "highest_price": None,
-        "target_price": product.get("target_price"), "target_hit": False,
+        "target_price": product.get("target_price"), "target_hit": False, "alert_pct": product.get("alert_pct"),
         "offers_error": sum(1 for o in offers.values() if o.get("error")),
         "offers_suspect": sum(1 for o in offers.values() if o.get("link_status") == "suspect"),
         "deal_score": 0, "deal_label": None,

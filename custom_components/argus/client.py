@@ -13,9 +13,11 @@ import aiohttp
 
 from .i18n import T
 from .models import gtin_key
-from .parsers import (TITLE_DOUBT, Parsed, bot_wall, is_search_url, parse_page, product_match, search_candidates,
-                      url_key, wrong_product)
-from .shops import domain_of, home_of, ready, search_address
+from .parsers import (TITLE_DOUBT, TITLE_OK, Parsed, accessory_word, bot_wall, is_search_url, parse_page, product_identity,
+                      product_match, search_candidates, title_score, url_key, wrong_product)
+from .const import RETAILERS
+from .finders import offers, product_pages
+from .shops import active_finders, shop_names, all_domains, domain_of, finder_address, finder_key, home_of, ready, search_address
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +42,8 @@ SEARCH_GAP = 120.0
 EAN_CANDIDATE_MIN = 0.2      # a search for the barcode itself: even a weak title match is worth a look at the page
 NAME_CANDIDATE_MIN = TITLE_DOUBT
 VERIFY_PAGES = 2             # product pages looked at per search before giving up
+FINDER_VERIFY = 3            # product pages looked at per finder result before giving up
+HARVEST_TTL = 900            # seconds a comparison-site result is reused for the other shops of the same product
 
 
 class Aborted(Exception):
@@ -121,6 +125,8 @@ class Fetcher:
         self._curl_ok: bool | None = None
         self._sessions: dict[str, Any] = {}
         self._warmed: set[str] = set()
+        self._harvest: dict[str, tuple[Any, ...]] = {}   # product -> (time, offers per shop, offers at other shops)
+        self._harvest_locks: dict[str, asyncio.Lock] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self.min_delay = 4.0
         self.blocks: dict[str, int] = {}
@@ -197,6 +203,8 @@ class Fetcher:
         home = redirect_home(retailer, url)
         for _hop in range(MAX_REDIRECTS + 1):
             check_url(url, home)
+            if retailer.startswith("a_"):
+                await self._check_public(url)    # a shop found through a comparison site: never the local network
             if self._curl_ok:
                 # streamed: a body over MAX_BODY is never held in memory as a whole
                 resp = await sess.get(url, headers=headers, allow_redirects=False, stream=True)
@@ -241,6 +249,21 @@ class Fetcher:
             except LookupError:                       # a charset name Python doesn't know
                 return status, raw.decode("utf-8", errors="replace")
         raise ValueError("too many redirects")
+
+    @staticmethod
+    async def _check_public(url: str) -> None:
+        """Refuse an address whose name resolves to a private, loopback or link-local address."""
+        import ipaddress
+        import socket
+
+        host = urlparse(url).hostname or ""
+        try:
+            infos = await asyncio.get_running_loop().getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        except OSError as err:
+            raise ValueError(f"cannot resolve {host}") from err
+        for info in infos:
+            if not ipaddress.ip_address(info[4][0].split("%")[0]).is_global:
+                raise ValueError(f"{host} is not a public address")
 
     def next_free(self, url_or_site: str, search: bool = False) -> float:
         """Seconds until this site may be asked again (searches: also the search gap)."""
@@ -374,7 +397,14 @@ class Fetcher:
 
     async def discover(self, retailer: str, product: dict[str, Any], force: bool = False,
                        skip: set[str] | frozenset[str] = frozenset(), url: str | None = None) -> tuple[str | None, str | None]:
-        """Search the shop for this product, by barcode first and by name second; (link, how) with how 'ean' or 'name'.
+        """Find the product's page at this shop; (link, how) with how 'ean', 'agg', 'web' or 'name'.
+
+        Several methods are combined, cheapest and surest first, and every candidate page is fetched and verified
+        (barcode / model number / title / accessory words) before it is linked:
+          1. the shop's own search for the barcode
+          2. links to this shop in price-comparison sites (their sponsored product ads included), one search per product
+          3. a web search for "<brand> <name> <shop>": the first results on the shop's domain
+          4. the shop's own search for the name
         Every attempt is kept in the shop's trace (Shops → click a shop). skip: url_keys of links blocked for this
         product. url: a search page to use instead of the shop's own search address."""
         t0 = time.time()
@@ -391,51 +421,230 @@ class Fetcher:
                         skip: set[str] | frozenset[str], url: str | None) -> tuple[str | None, str | None]:
         self.discover_error[retailer] = None
         ean = gtin_key(product.get("ean")) and (product.get("ean") or "").strip()
-        queries: list[tuple[str, str]] = []
-        if url:
-            queries.append(("name", url))
-        else:
-            if ean and (u := search_address(retailer, None, ean)):
-                queries.append(("ean", u))
-            if product.get("name") and (u := search_address(retailer, search_terms(product), ean)) and u not in [q for _, q in queries]:
-                queries.append(("name", u))
-        if not queries or (not force and self.cooldown_left(retailer) > 0):
-            self.discover_error[retailer] = T("paused after being blocked") if queries else T("this shop has no search URL")
+        shop_ean = ("ean", u) if not url and ean and (u := search_address(retailer, None, ean)) else None
+        shop_name = ("name", url) if url else (
+            ("name", u) if product.get("name") and (u := search_address(retailer, search_terms(product), ean)) and (not shop_ean or u != shop_ean[1]) else None)
+        finders = bool(not url and retailer in RETAILERS and active_finders())
+        if not (shop_ean or shop_name or finders) or (not force and self.cooldown_left(retailer) > 0):
+            self.discover_error[retailer] = T("paused after being blocked") if (shop_ean or shop_name or finders) else T("this shop has no search URL")
             return None, None
-        for how, search_url in queries:
-            try:
-                status, page = await self._get(retailer, search_url, search=True)
-                self._search_meta[retailer] = (status, len(page or ""))
-            except Aborted:
-                self.discover_error[retailer] = T("paused: the job was stopped")
-                return None, None
-            except Exception as err:  # noqa: BLE001
-                self.discover_error[retailer] = T("could not reach the shop: {error}", error=str(err)[:100])
-                return None, None
-            if status in (403, 429, 503) or (status < 400 and parse_page(retailer, page).blocked):
-                self._note_block(retailer)
-                self.discover_error[retailer] = T("the shop blocked the search (HTTP {status})", status=status) if status >= 400 \
-                    else T("the shop blocked the search (captcha / bot protection)")
-                return None, None
-            if status >= 400:
-                self.discover_error[retailer] = T("search page: HTTP error {status}", status=status)
-                continue
-            if (landed := self._landed_on_product(retailer, search_url, page, product)):
-                final, _parsed = landed
-                if url_key(retailer, final) not in skip:
-                    return final, how
-            floor = EAN_CANDIDATE_MIN if how == "ean" else NAME_CANDIDATE_MIN
-            candidates = [c for c in search_candidates(retailer, page, product, skip) if c["score"] >= floor][:VERIFY_PAGES]
-            for cand in candidates:                   # look at the product page itself before trusting a result
-                verdict = await self._verify(retailer, cand["url"], product)
-                if verdict == "ok":
-                    return cand["url"], how
-                if verdict == "blocked":
-                    return None, None
-            self.discover_error[retailer] = T("no matching product found") if (product.get("name") or "")[:12].lower() in page.lower() \
-                or (ean and ean in page) else \
-                T("the search page does not contain the product: this shop probably loads its results with JavaScript. Paste the product page URL instead.")
+        if shop_ean:
+            found, stop = await self._shop_search(retailer, product, *shop_ean, skip)
+            if found or stop:
+                return found, (shop_ean[0] if found else None)
+        if finders:
+            for how, loader in (("agg", self._harvested), ("web", self._web_results)):
+                cands = await loader(retailer, product, skip)
+                for cand in cands[:FINDER_VERIFY]:
+                    verdict = await self._verify(retailer, cand["url"], product)
+                    if verdict == "ok":
+                        return cand["url"], how
+                    if verdict == "blocked":
+                        return None, None
+        if shop_name:
+            found, stop = await self._shop_search(retailer, product, *shop_name, skip)
+            if found:
+                return found, shop_name[0]
         return None, None
+
+    async def _shop_search(self, retailer: str, product: dict[str, Any], how: str, search_url: str,
+                           skip: set[str] | frozenset[str]) -> tuple[str | None, bool]:
+        """One search on the shop's own site: (link or None, stop). stop: the shop blocked us or the job was stopped."""
+        ean = gtin_key(product.get("ean")) and (product.get("ean") or "").strip()
+        try:
+            status, page = await self._get(retailer, search_url, search=True)
+            self._search_meta[retailer] = (status, len(page or ""))
+        except Aborted:
+            self.discover_error[retailer] = T("paused: the job was stopped")
+            return None, True
+        except Exception as err:  # noqa: BLE001
+            self.discover_error[retailer] = T("could not reach the shop: {error}", error=str(err)[:100])
+            return None, False
+        if status in (403, 429, 503) or (status < 400 and parse_page(retailer, page).blocked):
+            self._note_block(retailer)
+            self.discover_error[retailer] = T("the shop blocked the search (HTTP {status})", status=status) if status >= 400 \
+                else T("the shop blocked the search (captcha / bot protection)")
+            return None, True
+        if status >= 400:
+            self.discover_error[retailer] = T("search page: HTTP error {status}", status=status)
+            return None, False
+        if (landed := self._landed_on_product(retailer, search_url, page, product)):
+            final, _parsed = landed
+            if url_key(retailer, final) not in skip:
+                return final, False
+        floor = EAN_CANDIDATE_MIN if how == "ean" else NAME_CANDIDATE_MIN
+        candidates = [c for c in search_candidates(retailer, page, product, skip) if c["score"] >= floor][:VERIFY_PAGES]
+        for cand in candidates:                   # look at the product page itself before trusting a result
+            verdict = await self._verify(retailer, cand["url"], product)
+            if verdict == "ok":
+                return cand["url"], False
+            if verdict == "blocked":
+                return None, True
+        self.discover_error[retailer] = T("no matching product found") if (product.get("name") or "")[:12].lower() in page.lower() \
+            or (ean and ean in page) else \
+            T("the search page does not contain the product: this shop probably loads its results with JavaScript. Paste the product page URL instead.")
+        return None, False
+
+    # ----------------------------------------------------------------- finders (web search, comparison sites)
+    async def _finder_page(self, finder: dict[str, Any], query: str, product: dict[str, Any]) -> str:
+        """The result page of one finder search ('' when it failed or the finder is paused); traced under the finder."""
+        key = finder_key(finder["id"])
+        if self.cooldown_left(key) > 0:
+            return ""
+        url, t0 = finder_address(finder, query), time.time()
+        status, page, err = await self.get_page(key, url)
+        self._trace(key, "search", url, t0, status or None, len(page or ""), "ok" if page else None, err, product.get("id"))
+        return page if not err and status < 400 else ""
+
+    async def _finder_links(self, finder: dict[str, Any], query: str, product: dict[str, Any],
+                            skip: set[str] | frozenset[str]) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+        page = await self._finder_page(finder, query, product)
+        if not page:
+            return {}, []
+        names = shop_names()
+        by_shop, others = offers(page, all_domains(), product, skip, url_key, finder["domain"], names)
+        if finder.get("follow") and product.get("name"):
+            # Tweakers, Kieskeurig, Beslist…: the search lists products; the product's own page there lists every shop
+            for url in product_pages(page, finder["domain"], product)[:1]:
+                t0 = time.time()
+                status, sub, err = await self.get_page(finder_key(finder["id"]), url)
+                self._trace(finder_key(finder["id"]), "page", url, t0, status or None, len(sub or ""), "ok" if sub else None, err, product.get("id"))
+                if sub and not err and status < 400:
+                    more, new = offers(sub, all_domains(), product, skip, url_key, finder["domain"], names)
+                    for rid, items in more.items():
+                        have = {x["url"] for x in by_shop.setdefault(rid, [])}
+                        by_shop[rid].extend(i for i in items if i["url"] not in have or i["url"] is None)
+                    others += [o for o in new if o["domain"] not in {x["domain"] for x in others}]
+        for items in [*by_shop.values(), others]:
+            for i in items:
+                i["finder"], i["by_ean"] = finder["id"], bool(gtin_key(query))
+        return by_shop, others
+
+    async def harvest(self, product: dict[str, Any], max_age: float = HARVEST_TTL) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+        """Every offer comparison sites show for this product: ({shop id: [offers]}, [offers at shops not in your list]).
+        One search per comparison site (by barcode, else by name) serves every shop; the result is kept for a while."""
+        pid = product.get("id") or product.get("name") or ""
+        lock = self._harvest_locks.setdefault(pid, asyncio.Lock())
+        async with lock:
+            cached = self._harvest.get(pid)
+            if not cached or time.time() - cached[0] > max_age:
+                merged: dict[str, list[dict[str, Any]]] = {}
+                others: list[dict[str, Any]] = []
+                ean = gtin_key(product.get("ean")) and (product.get("ean") or "").strip()
+                for finder in active_finders("aggregator"):
+                    for query in [q for q in (ean, search_terms(product)) if q]:
+                        links, new = await self._finder_links(finder, query, product, frozenset())
+                        for rid, items in links.items():
+                            seen = {x["url"] for x in merged.setdefault(rid, [])}
+                            merged[rid].extend(i for i in items if i["url"] not in seen)
+                        others.extend(o for o in new if o["domain"] not in {x["domain"] for x in others})
+                        if links or new:
+                            break                 # the barcode search answered: no need for the name search
+                self._harvest[pid] = cached = (time.time(), merged, others)
+        return cached[1], cached[2]
+
+    async def _harvested(self, retailer: str, product: dict[str, Any], skip: set[str] | frozenset[str]) -> list[dict[str, Any]]:
+        """Links to this shop found in comparison sites."""
+        by_shop, _others = await self.harvest(product)
+        return [c for c in by_shop.get(retailer, []) if c["url"] and url_key(retailer, c["url"]) not in skip]
+
+    # ----------------------------------------------------------------- identity (name ↔ barcode)
+    async def identify(self, name: str | None = None, ean: str | None = None, brand: str | None = None,
+                       max_pages: int = 4) -> dict[str, Any]:
+        """Who is this product? From a name: find its barcode; from a barcode: find its name, brand, picture.
+
+        Finders (comparison sites first, then web search) and the shops' own barcode search give candidate pages; each
+        page is fetched and only counts when it really is the product: for a barcode the page must carry that barcode,
+        for a name its title must cover the name (model numbers included) and must not be an accessory. A barcode found
+        from a name is only trusted when two pages agree, or one page matches the name very closely.
+        Returns {name, brand, ean, mpn, image, category, price, ean_sure, pages: [{retailer, url, price, title}]}."""
+        from .models import normalize_gtin
+
+        ean = normalize_gtin(ean) if ean else None
+        probe = {"name": name or "", "brand": brand, "ean": ean}
+        cands: list[tuple[str, str]] = []
+
+        def add(rid: str, url: str) -> None:
+            if (rid, url) not in cands:
+                cands.append((rid, url))
+
+        query = ean or search_terms(probe)
+        if not query:
+            return {}
+        for finder in active_finders("aggregator") + active_finders("websearch"):
+            by_shop, _new = await self._finder_links(finder, query, probe if name else {}, frozenset())
+            ranked = sorted(((i["score"], rid, i["url"]) for rid, items in by_shop.items() for i in items if i["url"]), key=lambda x: -x[0])
+            for score, rid, url in ranked:
+                if ean or score >= TITLE_OK:
+                    add(rid, url)
+            if len(cands) >= max_pages:
+                break
+        if ean and len(cands) < 2:                   # the shops' own barcode search
+            for rid in [r for r in RETAILERS if search_address(r, None, ean)][:4]:
+                try:
+                    status, page = await self._get(rid, search_address(rid, None, ean) or "", search=True)
+                except Exception:  # noqa: BLE001 - also NotReady / Aborted: then there is simply nothing
+                    continue
+                if status >= 400 or bot_wall(page):
+                    continue
+                final = (self.final_url.get(rid) or "").split("#")[0]
+                if final and not is_search_url(final) and site_of(final) == site_of(search_address(rid, None, ean) or ""):
+                    add(rid, final)
+                for cand in search_candidates(rid, page, probe)[:1]:
+                    add(rid, cand["url"])
+                if len(cands) >= max_pages:
+                    break
+        pages: list[dict[str, Any]] = []
+        votes: dict[str, int] = {}
+        best: tuple[float, Parsed, str] | None = None
+        for rid, url in cands[: max_pages + 2]:
+            try:
+                status, page = await self._get(rid, url)
+            except Exception:  # noqa: BLE001
+                continue
+            if status >= 400 or bot_wall(page):
+                continue
+            parsed = parse_page(rid, page)
+            keys = {gtin_key(g) for g in parsed.gtins} - {None}
+            if ean:
+                ok, score = gtin_key(ean) in keys, 1.0
+            else:
+                score = title_score(name, brand, parsed.title)[0] if parsed.title else 0.0
+                ok = score >= TITLE_OK and not accessory_word(parsed.title, name)
+            if not ok:
+                continue
+            pages.append({"retailer": rid, "url": url, "price": parsed.price, "title": (parsed.title or "")[:200],
+                          "gtins": list(parsed.gtins)})
+            for g in parsed.gtins:
+                if (n := normalize_gtin(g)):
+                    votes[n] = votes.get(n, 0) + 1
+            if best is None or score > best[0]:
+                best = (score, parsed, url)
+            if len(pages) >= (2 if ean else 3):
+                break
+        if not best:
+            return {"name": name, "brand": brand, "ean": ean, "ean_sure": bool(ean), "pages": []}
+        ident = product_identity(best[1], best[2])
+        found_ean, sure = ean, bool(ean)
+        if not ean and votes:
+            top, n = max(votes.items(), key=lambda kv: kv[1])
+            sure = n >= 2 or (len(votes) == 1 and best[0] >= 0.9)
+            found_ean = top if sure else None
+        return {**ident, "name": name or ident["name"], "brand": brand or ident["brand"], "ean": found_ean, "ean_sure": sure,
+                "pages": pages}
+
+    async def _web_results(self, retailer: str, product: dict[str, Any], skip: set[str] | frozenset[str]) -> list[dict[str, Any]]:
+        """Web search for "<brand> <name> <shop>": results on the shop's own domain, in the order the engine gives them."""
+        shop = RETAILERS.get(retailer, (retailer,))[0]
+        out: list[dict[str, Any]] = []
+        for finder in active_finders("websearch"):
+            links, _new = await self._finder_links(finder, f"{search_terms(product)} {shop}".strip(), product, skip)
+            for item in links.get(retailer, []):
+                if item["url"] and item["url"] not in [x["url"] for x in out]:
+                    out.append(item)
+            if out:
+                break
+        return out
 
     async def _verify(self, retailer: str, url: str, product: dict[str, Any]) -> str:
         """'ok' when the product page proves it is the product, 'blocked' when the shop refused, else 'no'."""

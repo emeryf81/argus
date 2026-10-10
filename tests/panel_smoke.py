@@ -28,7 +28,7 @@ PRODUCT = {
     "target_price": 280.0, "ref_price": 399.0, "image": None, "price": 289.0, "lowest_price": 289.0, "all_time_low": 275.0,
     "highest_price": 399.0, "median_90": 320.0, "shops": 2, "shop_spread": 12.0, "cheapest_shop": "bol", "deal_score": 72,
     "deal": True, "spark": [330, 320, 310, 299, 289], "shops_for": ["amazon_be", "bol", "krefel"], "status": "ok",
-    "offers": {"bol": offer("bol", 289.0), "amazon_be": offer("Amazon", 301.5, error=None)},
+    "offers": {"bol": offer("bol", 289.0), "amazon_be": offer("Amazon", 301.5, error=None, via="css:shoparize")}, "alert_pct": 20,
     "history": {"bol": [[NOW - 86400 * 20, 330.0], [NOW - 86400 * 5, 299.0], [NOW - 3600, 289.0]]},
     "combined": [[NOW - 86400 * 20, 330.0], [NOW - 86400 * 5, 299.0], [NOW - 3600, 289.0]],
 }
@@ -44,7 +44,7 @@ OVERVIEW = {
                                "last_ok": NOW - 600, "failing": []}},
     "job": None, "last": None, "first_checks": [], "paused": {}, "schedule": {"rates": {"products": 1, "priority": 0}},
     "userscript_last": None, "relay_last": None, "relay": {"enabled": False, "pending": 0, "continuous": {}, "heartbeat": None},
-    "deal_rules": {}, "product_limit": 200, "full_refresh": False, "manual": {}, "health": {"errors": 0, "paused_hours": {}},
+    "deal_rules": {}, "alert_steps": [10, 20, 30, 40, 50], "marks": {"shoparize": {"letter": "s", "name": "Shoparize"}}, "product_limit": 200, "full_refresh": False, "manual": {}, "health": {"errors": 0, "paused_hours": {}},
 }
 
 SETTINGS = {
@@ -72,7 +72,12 @@ LOG = {"entries": [{"ts": NOW - 60, "level": "ok", "kind": "check", "message": "
                     "source": "auto", "results": {"bol": {"ok": True, "price": 289.0}}, "url": "https://bol.example/p"}],
        "total": 1, "more": False, "facets": {"kind": {"check": 1}, "retailer": {"bol": 1}, "source": {"auto": 1}, "level": {"ok": 1}},
        "kinds": {"check": "Shop check", "price": "Price"}}
-ANSWERS = {"argus/overview": OVERVIEW, "argus/collection": {"products": [PRODUCT]}, "argus/settings/get": SETTINGS,
+PREVIEW = {"id": "pabc123", "existing": False, "url": None, "retailer": None, "error": None, "name": "Sony WH-1000XM5", "brand": "Sony",
+           "ean": "4548736132580", "ean_sure": True, "mpn": None, "image": None, "price": 289.0, "category": "electronics", "pages": [],
+           "shops": [{"id": "bol", "label": "bol", "categories": [], "suggested": True, "found": True, "price": 289.0},
+                     {"id": "amazon_be", "label": "Amazon", "categories": ["electronics"], "suggested": True, "found": False, "price": None},
+                     {"id": "standaard", "label": "Standaard Boekhandel", "categories": ["books"], "suggested": False, "found": False, "price": None}]}
+ANSWERS = {"argus/product/preview": PREVIEW, "argus/overview": OVERVIEW, "argus/collection": {"products": [PRODUCT]}, "argus/settings/get": SETTINGS,
            "argus/product": PRODUCT, "argus/log": LOG, "argus/ticker": {"items": []}, "argus/notify/get": NOTIFY}
 SECTIONS = {"prices": ["today", "all", "dset"], "overview": ["cost", "shops"], "log": ["all", "checks", "errors"],
             "manage": ["add", "import", "links", "notify", "shops", "lab", "settings", "userscript", "backup", "legal", "about", "secret"]}
@@ -112,6 +117,21 @@ def main():
                 if page.evaluate("() => !!window.__el.shadowRoot.getElementById('crash_reload')"):
                     crashed.append(cur[0])
                     page.evaluate("() => { window.__el._rendered = false; window.__el.shadowRoot.innerHTML = ''; }")
+        import os
+        shots = os.environ.get("SHOT_DIR")
+        cur[0] = "add preview"
+        page.evaluate("() => { const e = window.__el; e.state.section = 'manage'; e.state.sub.manage = 'add'; e.render(true); }")
+        page.wait_for_timeout(200)
+        page.evaluate("() => { const r = window.__el.shadowRoot; r.getElementById('a_q').value = 'Sony WH-1000XM5'; r.getElementById('a_look').click(); }")
+        page.wait_for_timeout(600)
+        if not page.evaluate("() => !!window.__el.shadowRoot.querySelector('.pshops')"):
+            crashed.append("add preview")
+        if shots:
+            page.set_viewport_size({"width": 1280, "height": 900})
+            page.screenshot(path=f"{shots}/add.png", full_page=True)
+            page.evaluate("() => { const e = window.__el; e.state.section = 'prices'; e.state.sub.prices = 'all'; e.render(true); }")
+            page.wait_for_timeout(600)
+            page.screenshot(path=f"{shots}/list.png", full_page=True)
         cur[0] = "dialog"
         page.evaluate("() => window.__el.openSet('pabc123')")
         page.wait_for_timeout(300)

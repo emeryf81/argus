@@ -13,7 +13,7 @@ from homeassistant.components import websocket_api
 from homeassistant.components.http import KEY_HASS, HomeAssistantView
 from homeassistant.core import HomeAssistant, callback
 
-from .const import API_LEVEL, CATEGORIES, CONF_DEV_FULL_REFRESH, DOMAIN, PANEL_URL, RETAILERS
+from .const import ALERT_STEPS, API_LEVEL, CATEGORIES, CONF_DEV_FULL_REFRESH, DOMAIN, PANEL_URL, RETAILERS
 from .i18n import LANGUAGES, T, tr
 from .models import combined_history, normalize_product_id, offer_price
 from .shops import CATEGORY_OF, home_of
@@ -51,7 +51,8 @@ def _card(coord, pid: str, with_history: bool = False) -> dict[str, Any]:
                   "link_reason": o.get("link_reason"), "found_via": o.get("found_via"),
                   "via": o.get("last_via") if o.get("available") and not o.get("manual_price") else None,
                   "suspect": o.get("suspect"), "approved": o.get("approved"), "price_choice": o.get("price_choice"),
-                  "ignored": bool(o.get("error") and o.get("ignored_error") == o.get("error"))}
+                  "ignored": bool(o.get("error") and o.get("ignored_error") == o.get("error")),
+                  "finder_price": o.get("finder_price")}
             for rid, o in offers.items() if rid in RETAILERS
         },
     }
@@ -61,10 +62,21 @@ def _card(coord, pid: str, with_history: bool = False) -> dict[str, Any]:
     return card
 
 
+def _marks() -> dict[str, dict[str, str]]:
+    """The letter in a circle next to a price that came from a comparison service (ⓢ Shoparize, ⓟ Producthero…)."""
+    from .finders import CSS_SERVICES
+    from .shops import FINDERS
+
+    out = {k: {"letter": v[1], "name": v[0]} for k, v in CSS_SERVICES.items()}
+    for fid, f in FINDERS.items():
+        out.setdefault(fid, {"letter": (f.get("mark") or f["name"][:1]).lower(), "name": f["name"]})
+    return out
+
+
 @callback
 def async_register_websocket(hass: HomeAssistant) -> None:
     """Register panel websocket commands and the userscript and relay HTTP views."""
-    for cmd in (ws_overview, ws_product, ws_add_product, ws_update_product, ws_remove_product, ws_product_find,
+    for cmd in (ws_overview, ws_product, ws_product_preview, ws_add_product, ws_update_product, ws_remove_product, ws_product_find,
                 ws_product_refresh, ws_collection, ws_import_preview, ws_import_run, ws_job, ws_settings_get, ws_settings_set,
                 ws_shop_settings_import, ws_shop_settings_export, ws_shop_settings_accept, ws_shop_settings_withdraw,
                 ws_shop_action, ws_ignore_error, ws_notify_get, ws_notify_set, ws_notify_test, ws_log, ws_logs_export,
@@ -104,7 +116,9 @@ def ws_overview(hass, connection, msg):
         "relay": {"enabled": coord.relay_enabled, "pending": coord.relay_items(100)["total"] if coord.relay_enabled else 0,
                   "continuous": coord.continuous_items(1)["counts"] if coord.relay_enabled else {},
                   "heartbeat": coord.store.get("relay_heartbeat")},
-        "deal_rules": coord.deal_rules,
+        "deal_rules": coord.deal_rules, "marks": _marks(), "alert_steps": list(ALERT_STEPS),
+        "auto_shops": {k: {"name": v["name"], "domain": v["domain"], "found_by": coord.via_name(v.get("found_by"))}
+                       for k, v in (coord.store.get("auto_shops") or {}).items() if k in RETAILERS},
         "product_limit": coord.product_limit, "full_refresh": coord.dev(CONF_DEV_FULL_REFRESH), "manual": coord.manual_status(),
         "health": {
             "errors": sum(s["offers_error"] for s in data["statuses"].values()),
@@ -112,6 +126,25 @@ def ws_overview(hass, connection, msg):
                              for r in coord.retailers if coord.fetcher.cooldown_left(r) > 0},
         },
     })
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/product/preview", vol.Optional("url", default=""): vol.All(str, vol.Length(max=2000)),
+                                  vol.Optional("name", default=""): vol.All(str, vol.Length(max=200)),
+                                  vol.Optional("ean", default=""): vol.All(str, vol.Length(max=40))})
+@websocket_api.async_response
+async def ws_product_preview(hass, connection, msg):
+    """Before adding: who the product is (looked up by address, name or barcode) and which shops to watch it at."""
+    coord = _coord(hass)
+    if coord is None:
+        _not_loaded(connection, msg)
+        return
+    try:
+        res = await coord.preview_product(msg["url"], msg["name"], msg["ean"])
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    connection.send_result(msg["id"], res)
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/product", vol.Required("product"): str})
@@ -132,7 +165,8 @@ def ws_product(hass, connection, msg):
     vol.Optional("brand"): vol.All(str, vol.Length(max=100)), vol.Optional("mpn"): vol.All(str, vol.Length(max=100)),
     vol.Optional("category"): str, vol.Optional("ref_price"): vol.Any(None, vol.Coerce(float)),
     vol.Optional("target_price"): vol.Any(None, vol.Coerce(float)), vol.Optional("priority"): vol.Any(None, int),
-    vol.Optional("notes"): vol.All(str, vol.Length(max=500)),
+    vol.Optional("notes"): vol.All(str, vol.Length(max=500)), vol.Optional("shops"): [str],
+    vol.Optional("alert_pct"): vol.Any(None, int), vol.Optional("image"): vol.Any(None, str),
 })
 @websocket_api.async_response
 async def ws_add_product(hass, connection, msg):
@@ -143,7 +177,8 @@ async def ws_add_product(hass, connection, msg):
         return
     try:
         res = await coord.add_product(msg["url"], **{k: msg[k] for k in ("name", "ean", "brand", "mpn", "category", "ref_price",
-                                                                           "target_price", "priority", "notes") if msg.get(k) not in (None, "")})
+                                                                           "target_price", "priority", "notes", "shops", "alert_pct", "image")
+                                                 if msg.get(k) not in (None, "", [])})
     except ValueError as err:
         connection.send_error(msg["id"], "invalid_format", str(err))
         return
