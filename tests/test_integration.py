@@ -681,6 +681,12 @@ async def test_finds_are_asked_once_per_product_with_buttons_and_a_no_is_final(h
     assert coord.candidates(pid)[pid] == {}                                           # the same pages are not asked again
     # a used or made-up code does nothing
     assert coord.answer_token(actions[0]["action"]) == 0 and coord.answer_token("ARGUS_YES_000000000000") == 0
+    # a button answers only the finds its message showed, never one found after it
+    coord._add_candidate(pid, "fnac_be", {"url": "https://www.nl.fnac.be/a1", "how": "web", "title": HEADPHONES})
+    tok = coord.candidate_token(pid, list(coord.candidates(pid)[pid].values()))
+    coord._add_candidate(pid, "vandenborre", {"url": "https://www.vandenborre.be/p/1", "how": "web", "title": HEADPHONES})
+    assert coord.answer_token(f"ARGUS_YES_{tok}") == 1
+    assert "fnac_be" in coord.store["offers"][pid] and set(coord.candidates(pid)[pid]) == {"vandenborre"}
 
 
 async def test_a_page_that_cannot_be_read_asks_for_details_or_its_source(hass: HomeAssistant, entry, world):

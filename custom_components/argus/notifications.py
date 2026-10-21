@@ -284,7 +284,7 @@ class Notifier:
         for rule in self.rules:
             if not rule.get("enabled") or "candidates" not in rule["triggers"] or not self.in_scope(rule, pid):
                 continue
-            tok = self.coord.candidate_token(pid)
+            tok = self.coord.candidate_token(pid, new)
             actions = [{"action": f"ARGUS_YES_{tok}", "title": tr("✓ Yes") if len(new) == 1 else tr("✓ Yes, all")},
                        {"action": f"ARGUS_NO_{tok}", "title": tr("✗ No") if len(new) == 1 else tr("✗ None")},
                        {"action": "URI", "title": tr("Open"), "uri": f"/{PANEL_URL}"}]

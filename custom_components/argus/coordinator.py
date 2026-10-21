@@ -1869,13 +1869,13 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.notifier.on_candidates(pid, new, len(waiting))
         self.push_update()
 
-    def answer_candidate(self, pid: str, retailer: str | None, yes: bool, source: str = "panel") -> int:
+    def answer_candidate(self, pid: str, retailer: str | list[str] | None, yes: bool, source: str = "panel") -> int:
         """Your answer: yes = from now on this page (or comparison-site price) is watched, its price counts for the
         charts, deals and alerts; no = never asked again for that page, and the shop is searched further.
-        retailer None: every find of the product."""
+        retailer None: every find of the product; a list: those shops."""
         pid = normalize_product_id(pid)
         waiting = (self.store.get("candidates") or {}).get(pid) or {}
-        rids = list(waiting) if retailer is None else [retailer]
+        rids = list(waiting) if retailer is None else [retailer] if isinstance(retailer, str) else list(retailer)
         done = 0
         for rid in rids:
             cand = waiting.pop(rid, None)
@@ -1923,13 +1923,14 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.push_update()
         return done
 
-    def candidate_token(self, pid: str) -> str:
-        """A short random code for the buttons of a push message (so a button can't be guessed or replayed for another product)."""
+    def candidate_token(self, pid: str, finds: list[dict[str, Any]]) -> str:
+        """A short random code for the buttons of a push message (so a button can't be guessed or replayed for another
+        product). It remembers which finds the message showed: its buttons answer those, never a later find."""
         import secrets
 
         tokens = self.store.setdefault("candidate_tokens", {})
         tok = secrets.token_hex(6)
-        tokens[tok] = {"product": pid, "ts": time.time()}
+        tokens[tok] = {"product": pid, "ts": time.time(), "finds": {c["retailer"]: c["key"] for c in finds}}
         for k in [k for k, v in tokens.items() if time.time() - v.get("ts", 0) > 14 * 86400]:
             del tokens[k]
         return tok
@@ -1942,7 +1943,9 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         tok = (self.store.get("candidate_tokens") or {}).pop(m.group(2), None)
         if not tok:
             return 0
-        return self.answer_candidate(tok["product"], None, m.group(1) == "YES", source="push")
+        waiting = (self.store.get("candidates") or {}).get(tok["product"]) or {}
+        rids = [rid for rid, key in (tok.get("finds") or {}).items() if (waiting.get(rid) or {}).get("key") == key]
+        return self.answer_candidate(tok["product"], rids, m.group(1) == "YES", source="push") if rids else 0
 
     @staticmethod
     def via_name(key: str | None) -> str:
