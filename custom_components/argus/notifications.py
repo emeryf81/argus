@@ -6,17 +6,19 @@ Rules live in the store (no reload needed) and are edited in the panel.
 """
 from __future__ import annotations
 
+import html as _html
 import logging
 import re
 import time
 import uuid
+from urllib.parse import quote
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .const import CATEGORIES, DOMAIN, RETAILERS
+from .const import CATEGORIES, DOMAIN, PANEL_URL, RETAILERS
 from .i18n import LocalizedError, T, tr
 from .models import normalize_product_id
 
@@ -30,6 +32,7 @@ EVENT_NOTIFICATION = f"{DOMAIN}_notification"
 TRIGGERS: dict[str, tuple[str, bool, str | None]] = {
     "target_hit": ("Target price reached", True, None),
     "my_alert": ("Your deal alert on the product (10–50% cheaper)", True, None),
+    "candidates": ("Found elsewhere: is it the same item? (with Yes/No buttons)", False, None),
     "all_time_low": ("Lowest price so far", True, None),
     "discount": ("Discount vs reference or 90-day price", True, "discount_pct"),
     "price_below": ("Price below an amount", True, "price_below"),
@@ -56,7 +59,7 @@ def default_rules(threshold: float, notify_service: str = "") -> list[dict[str, 
         targets.append({"type": "mobile" if "mobile_app_" in svc else "notify", "service": svc})
     return [
         {"id": "deals", "name": "All deals", "enabled": True, "scope": {"type": "all"},
-         "triggers": ["target_hit", "my_alert", "all_time_low", "discount"], "params": {"discount_pct": int(threshold)},
+         "triggers": ["target_hit", "my_alert", "candidates", "all_time_low", "discount"], "params": {"discount_pct": int(threshold)},
          "shops": [], "targets": targets, "cooldown_hours": 24, "quiet": None, "image": True, "link": True},
         {"id": "digest", "name": "Daily digest", "enabled": True, "scope": {"type": "all"},
          "triggers": ["digest"], "params": {}, "shops": [], "targets": list(targets), "cooldown_hours": 0,
@@ -203,6 +206,13 @@ def product_triggers(rule: dict[str, Any], before: dict[str, Any], after: dict[s
     return out
 
 
+
+def _md_url(url: str | None) -> str | None:
+    """A web address as a Markdown link target: http(s) only, with brackets, parentheses and spaces encoded."""
+    if not url or not re.match(r"https?://", url, re.I):
+        return None
+    return quote(url, safe=":/?#@!$&'*+,;=%~")
+
 class Notifier:
     def __init__(self, coord: ArgusCoordinator) -> None:
         self.coord = coord
@@ -267,6 +277,32 @@ class Notifier:
                             image=p.get("image") if rule.get("image") else None,
                             data={"product": pid, "triggers": [h[0] for h in hits], "price": price})
 
+    async def on_candidates(self, pid: str, new: list[dict[str, Any]], waiting: int) -> None:
+        """Finds to confirm, bundled per product: one message with every new find (shop, title, price). On the phone
+        it has buttons: Yes (all of them), No (none of them) and Open (the list in the panel, to answer one by one)."""
+        p = self.store["products"].get(pid, {})
+        name = p.get("name") or p.get("ean") or pid
+        plain = lambda x: re.sub(r"[\[\]<>`]", "", str(x))   # web-page text: no Markdown links or HTML in the message
+        lines = [f"• {plain(c['shop'])}: " + (f"€{c['price']:.2f}" if c.get("price") else tr("no price yet"))
+                 + (f" — {plain(c['title'][:70])}" if c.get("title") else "") + (f"\n  {plain(c['url'])}" if c.get("url") else "")
+                 for c in new[:8]]
+        if len(new) > 8:
+            lines.append(tr("… and {n} more", n=len(new) - 8))
+        title = "🔎 " + (tr("Is this {name}?", name=name) if len(new) == 1 else tr("{n} possible matches for {name}", n=len(new), name=name))
+        message = "\n".join(lines) + "\n" + (tr("Same item? Yes: ARGUS watches its price from now on.") if len(new) == 1
+                                              else tr("All the same item? Or answer one by one in the panel ({n} waiting).", n=waiting))
+        for rule in self.rules:
+            if not rule.get("enabled") or "candidates" not in rule["triggers"] or not self.in_scope(rule, pid):
+                continue
+            tok = self.coord.candidate_token(pid, new)
+            actions = [{"action": f"ARGUS_YES_{tok}", "title": tr("✓ Yes") if len(new) == 1 else tr("✓ Yes, all")},
+                       {"action": f"ARGUS_NO_{tok}", "title": tr("✗ No") if len(new) == 1 else tr("✗ None")},
+                       {"action": "URI", "title": tr("Open"), "uri": f"/{PANEL_URL}"}]
+            await self.send(rule, title, message, url=new[0].get("url") if len(new) == 1 else None,
+                            image=p.get("image") if rule.get("image") else None,
+                            data={"product": pid, "triggers": ["candidates"], "candidates": [c["retailer"] for c in new]},
+                            notification_id=f"{DOMAIN}_ask_{pid}", actions=actions, force=False)
+
     async def on_digest(self, digest: dict[str, Any]) -> None:
         """Send each enabled digest rule the deals allowed by its scope and shop filters."""
         for rule in self.rules:
@@ -309,7 +345,7 @@ class Notifier:
     # -------------------------------------------------------------- sending
     async def send(self, rule: dict[str, Any], title: str, message: str, *, url: str | None = None,
                    image: str | None = None, data: dict[str, Any] | None = None, notification_id: str | None = None,
-                   force: bool = False) -> list[dict[str, Any]]:
+                   force: bool = False, actions: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
         """Send to every target of the rule; queued during quiet hours (except HA notification/event)."""
         results = []
         quiet = not force and in_quiet(rule.get("quiet"), dt_util.now())
@@ -325,7 +361,7 @@ class Notifier:
                 results.append({"target": target, "ok": True, "queued": True})
                 continue
             try:
-                await self._send_one(target, title, message, url, image, notification_id)
+                await self._send_one(target, title, message, url, image, notification_id, actions)
                 results.append({"target": target, "ok": True})
             except Exception as err:  # noqa: BLE001 - a broken target must not break the rest
                 _LOGGER.warning("Notification via %s failed: %s", target, err)
@@ -341,12 +377,13 @@ class Notifier:
         return results
 
     async def _send_one(self, t: dict[str, Any], title: str, message: str, url: str | None, image: str | None,
-                        notification_id: str | None) -> None:
+                        notification_id: str | None, actions: list[dict[str, Any]] | None = None) -> None:
         call = self.hass.services.async_call
         full = message + (f"\n{url}" if url and t["type"] in ("email", "notify", "entity") else "")
         if t["type"] == "persistent":
             await call("persistent_notification", "create",
-                       {"title": title, "message": message + (f"\n\n[{tr('Open')}]({url})" if url else ""),
+                       {"title": title, "message": message + (f"\n\n[{tr('Open')}]({_md_url(url)})" if _md_url(url) else "")
+                        + (f"\n\n[{tr('Answer in ARGUS')}](/{PANEL_URL})" if actions else ""),
                         **({"notification_id": notification_id} if notification_id else {})}, blocking=True)
         elif t["type"] == "mobile":
             extra: dict[str, Any] = {}
@@ -354,16 +391,20 @@ class Notifier:
                 extra.update(url=url, clickAction=url)
             if image:
                 extra["image"] = image
+            if actions:                                    # buttons in the phone's notification (Home Assistant app)
+                extra["actions"] = actions
+                extra["tag"] = notification_id or "argus"
             await call("notify", t["service"].split(".", 1)[1],
                        {"title": title, "message": message, **({"data": extra} if extra else {})}, blocking=True)
         elif t["type"] == "notify":
             await call("notify", t["service"].split(".", 1)[1], {"title": title, "message": full}, blocking=True)
         elif t["type"] == "email":
-            html = (f"<h3>{title}</h3><p>{message.replace(chr(10), '<br>')}</p>"
-                    + (f'<p><a href="{url}">{tr("View in the shop")}</a></p>' if url else "")
-                    + (f'<img src="{image}" width="240">' if image else ""))
+            esc = _html.escape                              # shop titles and addresses come from web pages
+            body = (f"<h3>{esc(title)}</h3><p>{esc(message).replace(chr(10), '<br>')}</p>"
+                    + (f'<p><a href="{esc(url)}">{esc(tr("View in the shop"))}</a></p>' if url else "")
+                    + (f'<img src="{esc(image)}" width="240">' if image else ""))
             await call("notify", t["service"].split(".", 1)[1],
-                       {"title": title, "message": full, "target": t["to"], "data": {"html": html}}, blocking=True)
+                       {"title": title, "message": full, "target": t["to"], "data": {"html": body}}, blocking=True)
         elif t["type"] == "entity":
             await call("notify", "send_message", {"entity_id": t["entity_id"], "title": title, "message": full}, blocking=True)
         elif t["type"] == "tts":

@@ -90,3 +90,5 @@ ALERT_STEPS = (10, 20, 30, 40, 50)
 # Comparison sites: how often a product's offers are asked there, and how long their price may stand in for a shop
 FINDER_ROUND_HOURS = 12
 FINDER_PRICE_MAX_AGE = 72 * 3600
+# A product is searched again every day at the shops where it has no confirmed page yet
+REDISCOVER_HOURS = 24

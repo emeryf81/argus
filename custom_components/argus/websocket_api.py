@@ -40,6 +40,8 @@ def _card(coord, pid: str, with_history: bool = False) -> dict[str, Any]:
         "deal": coord.is_deal(st),
         "spark": [pr for _, pr in series][-60:],
         "shops_for": coord.shops_for(pid),
+        "candidates": sorted(({k: c.get(k) for k in ("retailer", "shop", "url", "title", "price", "image", "how", "via", "sure", "found", "new_shop")}
+                              for c in (coord.store.get("candidates") or {}).get(pid, {}).values()), key=lambda c: c.get("found") or 0),
         "offers": {
             rid: {"label": RETAILERS[rid][0], "url": o.get("url"), "price": offer_price(o),
                   "auto_price": o.get("auto_price") if o.get("manual_price") else None,
@@ -76,7 +78,7 @@ def _marks() -> dict[str, dict[str, str]]:
 @callback
 def async_register_websocket(hass: HomeAssistant) -> None:
     """Register panel websocket commands and the userscript and relay HTTP views."""
-    for cmd in (ws_overview, ws_product, ws_product_preview, ws_add_product, ws_update_product, ws_remove_product, ws_product_find,
+    for cmd in (ws_overview, ws_product, ws_product_preview, ws_candidate, ws_add_product, ws_update_product, ws_remove_product, ws_product_find,
                 ws_product_refresh, ws_collection, ws_import_preview, ws_import_run, ws_job, ws_settings_get, ws_settings_set,
                 ws_shop_settings_import, ws_shop_settings_export, ws_shop_settings_accept, ws_shop_settings_withdraw,
                 ws_shop_action, ws_ignore_error, ws_notify_get, ws_notify_set, ws_notify_test, ws_log, ws_logs_export,
@@ -87,6 +89,10 @@ def async_register_websocket(hass: HomeAssistant) -> None:
     hass.http.register_view(UserscriptView())
     hass.http.register_view(RelayView())
 
+
+
+# a page source you paste rides in one websocket message (Home Assistant takes at most 4 MB): the panel slims it first
+PAGE_SOURCE_MAX = 3_500_000
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/overview"})
 @callback
@@ -131,7 +137,10 @@ def ws_overview(hass, connection, msg):
 @websocket_api.require_admin
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/product/preview", vol.Optional("url", default=""): vol.All(str, vol.Length(max=2000)),
                                   vol.Optional("name", default=""): vol.All(str, vol.Length(max=200)),
-                                  vol.Optional("ean", default=""): vol.All(str, vol.Length(max=40))})
+                                  vol.Optional("ean", default=""): vol.All(str, vol.Length(max=40)),
+                                  vol.Optional("html", default=""): vol.All(str, vol.Length(max=PAGE_SOURCE_MAX)),
+                                  vol.Optional("details", default={}): {vol.Optional(k): vol.All(str, vol.Length(max=200))
+                                                                        for k in ("name", "brand", "mpn", "sku", "ean")}})
 @websocket_api.async_response
 async def ws_product_preview(hass, connection, msg):
     """Before adding: who the product is (looked up by address, name or barcode) and which shops to watch it at."""
@@ -140,11 +149,26 @@ async def ws_product_preview(hass, connection, msg):
         _not_loaded(connection, msg)
         return
     try:
-        res = await coord.preview_product(msg["url"], msg["name"], msg["ean"])
+        res = await coord.preview_product(msg["url"], msg["name"], msg["ean"], html=msg["html"] or None,
+                                          details={k: v for k, v in msg["details"].items() if v})
     except ValueError as err:
         connection.send_error(msg["id"], "invalid_format", str(err))
         return
     connection.send_result(msg["id"], res)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/candidate", vol.Required("product"): str,
+                                  vol.Optional("retailer"): vol.Any(None, str), vol.Required("answer"): vol.In(["yes", "no"])})
+@callback
+def ws_candidate(hass, connection, msg):
+    """Your answer to a find: is it the same item? (retailer None: every find of the product)."""
+    coord = _coord(hass)
+    if coord is None:
+        _not_loaded(connection, msg)
+        return
+    n = coord.answer_candidate(msg["product"], msg.get("retailer"), msg["answer"] == "yes")
+    connection.send_result(msg["id"], {"answered": n})
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/product", vol.Required("product"): str})
@@ -167,6 +191,7 @@ def ws_product(hass, connection, msg):
     vol.Optional("target_price"): vol.Any(None, vol.Coerce(float)), vol.Optional("priority"): vol.Any(None, int),
     vol.Optional("notes"): vol.All(str, vol.Length(max=500)), vol.Optional("shops"): [str],
     vol.Optional("alert_pct"): vol.Any(None, int), vol.Optional("image"): vol.Any(None, str),
+    vol.Optional("sku"): vol.All(str, vol.Length(max=100)), vol.Optional("html"): vol.All(str, vol.Length(max=PAGE_SOURCE_MAX)),
 })
 @websocket_api.async_response
 async def ws_add_product(hass, connection, msg):
@@ -177,7 +202,7 @@ async def ws_add_product(hass, connection, msg):
         return
     try:
         res = await coord.add_product(msg["url"], **{k: msg[k] for k in ("name", "ean", "brand", "mpn", "category", "ref_price",
-                                                                           "target_price", "priority", "notes", "shops", "alert_pct", "image")
+                                                                           "target_price", "priority", "notes", "shops", "alert_pct", "image", "sku", "html")
                                                  if msg.get(k) not in (None, "", [])})
     except ValueError as err:
         connection.send_error(msg["id"], "invalid_format", str(err))

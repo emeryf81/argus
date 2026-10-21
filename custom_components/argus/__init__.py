@@ -12,7 +12,7 @@ from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
+from homeassistant.core import Event, HomeAssistant, ServiceCall, SupportsResponse, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_track_time_change, async_track_time_interval
@@ -122,6 +122,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_reload))
+
+    @callback
+    def _push_answer(event: Event) -> None:
+        """A button of an ARGUS push message (Home Assistant app): Yes / No for the finds to confirm."""
+        if coord.answer_token(str(event.data.get("action") or "")):
+            hass.async_create_task(coord.async_request_refresh())
+
+    entry.async_on_unload(hass.bus.async_listen("mobile_app_notification_action", _push_answer))
 
     if not hass.data.get(f"{DOMAIN}_frontend"):
         hass.data[f"{DOMAIN}_frontend"] = True

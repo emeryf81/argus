@@ -29,6 +29,11 @@ PRODUCT = {
     "highest_price": 399.0, "median_90": 320.0, "shops": 2, "shop_spread": 12.0, "cheapest_shop": "bol", "deal_score": 72,
     "deal": True, "spark": [330, 320, 310, 299, 289], "shops_for": ["amazon_be", "bol", "krefel"], "status": "ok",
     "offers": {"bol": offer("bol", 289.0), "amazon_be": offer("Amazon", 301.5, error=None, via="css:shoparize")}, "alert_pct": 20,
+    "candidates": [{"retailer": "krefel", "shop": "Krëfel", "url": "https://www.krefel.be/nl/p/sony/55/", "title": "Sony WH-1000XM5 zwart",
+                    "price": 299.0, "how": "ean", "sure": True, "found": NOW - 300},
+                   {"retailer": "a_exellent_be", "shop": "Exellent", "url": "https://www.exellent.be/p/1", "title": "Sony WH-1000XM5",
+                    "price": 269.95, "how": "agg", "via": "shoparize", "sure": False, "found": NOW - 200,
+                    "new_shop": {"domain": "exellent.be", "name": "Exellent"}}],
     "history": {"bol": [[NOW - 86400 * 20, 330.0], [NOW - 86400 * 5, 299.0], [NOW - 3600, 289.0]]},
     "combined": [[NOW - 86400 * 20, 330.0], [NOW - 86400 * 5, 299.0], [NOW - 3600, 289.0]],
 }
@@ -72,14 +77,14 @@ LOG = {"entries": [{"ts": NOW - 60, "level": "ok", "kind": "check", "message": "
                     "source": "auto", "results": {"bol": {"ok": True, "price": 289.0}}, "url": "https://bol.example/p"}],
        "total": 1, "more": False, "facets": {"kind": {"check": 1}, "retailer": {"bol": 1}, "source": {"auto": 1}, "level": {"ok": 1}},
        "kinds": {"check": "Shop check", "price": "Price"}}
-PREVIEW = {"id": "pabc123", "existing": False, "url": None, "retailer": None, "error": None, "name": "Sony WH-1000XM5", "brand": "Sony",
+PREVIEW = {"id": "pabc123", "existing": False, "url": "https://www.bol.com/be/nl/p/x/1/", "retailer": "bol", "error": "blocked (HTTP 403)", "needs_details": True, "name": "Sony WH-1000XM5", "brand": "Sony",
            "ean": "4548736132580", "ean_sure": True, "mpn": None, "image": None, "price": 289.0, "category": "electronics", "pages": [],
            "shops": [{"id": "bol", "label": "bol", "categories": [], "suggested": True, "found": True, "price": 289.0},
                      {"id": "amazon_be", "label": "Amazon", "categories": ["electronics"], "suggested": True, "found": False, "price": None},
                      {"id": "standaard", "label": "Standaard Boekhandel", "categories": ["books"], "suggested": False, "found": False, "price": None}]}
 ANSWERS = {"argus/product/preview": PREVIEW, "argus/overview": OVERVIEW, "argus/collection": {"products": [PRODUCT]}, "argus/settings/get": SETTINGS,
            "argus/product": PRODUCT, "argus/log": LOG, "argus/ticker": {"items": []}, "argus/notify/get": NOTIFY}
-SECTIONS = {"prices": ["today", "all", "dset"], "overview": ["cost", "shops"], "log": ["all", "checks", "errors"],
+SECTIONS = {"prices": ["today", "confirm", "all", "dset"], "overview": ["cost", "shops"], "log": ["all", "checks", "errors"],
             "manage": ["add", "import", "links", "notify", "shops", "lab", "settings", "userscript", "backup", "legal", "about", "secret"]}
 
 
@@ -132,6 +137,9 @@ def main():
             page.evaluate("() => { const e = window.__el; e.state.section = 'prices'; e.state.sub.prices = 'all'; e.render(true); }")
             page.wait_for_timeout(600)
             page.screenshot(path=f"{shots}/list.png", full_page=True)
+            page.evaluate("() => { const e = window.__el; e.state.section = 'prices'; e.state.sub.prices = 'confirm'; e.render(true); }")
+            page.wait_for_timeout(600)
+            page.screenshot(path=f"{shots}/confirm.png", full_page=True)
         cur[0] = "dialog"
         page.evaluate("() => window.__el.openSet('pabc123')")
         page.wait_for_timeout(300)

@@ -104,6 +104,22 @@ COOLDOWN_HOURS = (1, 3, 6, 12, 24)
 CURL_REQUIREMENT = "curl_cffi>=0.7.0"
 
 
+def search_variants(product: dict[str, Any]) -> list[str]:
+    """The ways one product can be searched by words, surest first: brand + model number, the model number alone,
+    brand + name, and a short brand + name (shops' searches choke on long titles). Duplicates are left out."""
+    brand = (product.get("brand") or "").strip()
+    mpn = (product.get("mpn") or "").strip()
+    sku = (product.get("sku") or "").strip()
+    name_words = [w for w in (product.get("name") or "").split() if w.lower() != brand.lower()]
+    out: list[str] = []
+    for q in (f"{brand} {mpn}" if mpn and brand else "", mpn if len(mpn) >= 4 and any(ch.isdigit() for ch in mpn) else "",
+              search_terms(product), " ".join(([brand] if brand else []) + name_words[:2]), sku if len(sku) >= 5 else ""):
+        q = " ".join(q.split())
+        if q and q.lower() not in [x.lower() for x in out]:
+            out.append(q)
+    return out
+
+
 def search_terms(product: dict[str, Any], limit: int = 9) -> str:
     """The words to search a product by: brand and name without filler, at most `limit` words."""
     name = " ".join((product.get("name") or "").split())
@@ -127,6 +143,9 @@ class Fetcher:
         self._warmed: set[str] = set()
         self._harvest: dict[str, tuple[Any, ...]] = {}   # product -> (time, offers per shop, offers at other shops)
         self._harvest_locks: dict[str, asyncio.Lock] = {}
+        self.discover_quality: dict[tuple[str, str | None], str | None] = {}   # (shop, product) -> "ok" (surely) / "maybe" (you decide)
+        self._maybe: dict[tuple[str, str | None], tuple[str, str] | None] = {}
+        self.page_info: dict[str, dict[str, Any]] = {}       # address -> what its page said (title, price, picture…)
         self._locks: dict[str, asyncio.Lock] = {}
         self.min_delay = 4.0
         self.blocks: dict[str, int] = {}
@@ -419,33 +438,56 @@ class Fetcher:
 
     async def _discover(self, retailer: str, product: dict[str, Any], force: bool,
                         skip: set[str] | frozenset[str], url: str | None) -> tuple[str | None, str | None]:
+        """Every method in turn; a page that surely is the product ends the search, a page that may well be it (title
+        close enough, no other barcode, no accessory) is kept as the answer when nothing surer turns up: you confirm it."""
         self.discover_error[retailer] = None
+        key = (retailer, product.get("id"))               # per product: several products may be searched at once
+        self.discover_quality.pop(key, None)
+        self._maybe.pop(key, None)
         ean = gtin_key(product.get("ean")) and (product.get("ean") or "").strip()
         shop_ean = ("ean", u) if not url and ean and (u := search_address(retailer, None, ean)) else None
-        shop_name = ("name", url) if url else (
-            ("name", u) if product.get("name") and (u := search_address(retailer, search_terms(product), ean)) and (not shop_ean or u != shop_ean[1]) else None)
+        names: list[tuple[str, str]] = [("name", url)] if url else []
+        if not url and product.get("name"):
+            for q in search_variants(product)[:3]:
+                u = search_address(retailer, q, ean)
+                if u and u not in [n[1] for n in names] and (not shop_ean or u != shop_ean[1]):
+                    names.append(("name", u))
         finders = bool(not url and retailer in RETAILERS and active_finders())
-        if not (shop_ean or shop_name or finders) or (not force and self.cooldown_left(retailer) > 0):
-            self.discover_error[retailer] = T("paused after being blocked") if (shop_ean or shop_name or finders) else T("this shop has no search URL")
+        if not (shop_ean or names or finders) or (not force and self.cooldown_left(retailer) > 0):
+            self.discover_error[retailer] = T("paused after being blocked") if (shop_ean or names or finders) else T("this shop has no search URL")
             return None, None
+
+        def done(found: str | None, how: str | None) -> tuple[str | None, str | None]:
+            if found:
+                self.discover_quality[key] = "ok"
+                return found, how
+            if self._maybe.get(key):
+                self.discover_quality[key] = "maybe"
+                return self._maybe.pop(key)
+            return None, None
+
         if shop_ean:
             found, stop = await self._shop_search(retailer, product, *shop_ean, skip)
             if found or stop:
-                return found, (shop_ean[0] if found else None)
+                return done(found, shop_ean[0] if found else None)
         if finders:
             for how, loader in (("agg", self._harvested), ("web", self._web_results)):
                 cands = await loader(retailer, product, skip)
                 for cand in cands[:FINDER_VERIFY]:
                     verdict = await self._verify(retailer, cand["url"], product)
                     if verdict == "ok":
-                        return cand["url"], how
+                        return done(cand["url"], how)
+                    if verdict == "maybe" and not self._maybe.get((retailer, product.get("id"))):
+                        self._maybe[(retailer, product.get("id"))] = (cand["url"], how)
                     if verdict == "blocked":
-                        return None, None
-        if shop_name:
-            found, stop = await self._shop_search(retailer, product, *shop_name, skip)
+                        return done(None, None)
+        for how, search_url in names:
+            found, stop = await self._shop_search(retailer, product, how, search_url, skip)
             if found:
-                return found, shop_name[0]
-        return None, None
+                return done(found, how)
+            if stop:
+                break
+        return done(None, None)
 
     async def _shop_search(self, retailer: str, product: dict[str, Any], how: str, search_url: str,
                            skip: set[str] | frozenset[str]) -> tuple[str | None, bool]:
@@ -478,6 +520,8 @@ class Fetcher:
             verdict = await self._verify(retailer, cand["url"], product)
             if verdict == "ok":
                 return cand["url"], False
+            if verdict == "maybe" and not self._maybe.get((retailer, product.get("id"))):
+                self._maybe[(retailer, product.get("id"))] = (cand["url"], how)
             if verdict == "blocked":
                 return None, True
         self.discover_error[retailer] = T("no matching product found") if (product.get("name") or "")[:12].lower() in page.lower() \
@@ -637,13 +681,16 @@ class Fetcher:
         """Web search for "<brand> <name> <shop>": results on the shop's own domain, in the order the engine gives them."""
         shop = RETAILERS.get(retailer, (retailer,))[0]
         out: list[dict[str, Any]] = []
+        ean = gtin_key(product.get("ean")) and (product.get("ean") or "").strip()
+        queries = [q for q in [*(search_variants(product)[:2]), ean] if q]
         for finder in active_finders("websearch"):
-            links, _new = await self._finder_links(finder, f"{search_terms(product)} {shop}".strip(), product, skip)
-            for item in links.get(retailer, []):
-                if item["url"] and item["url"] not in [x["url"] for x in out]:
-                    out.append(item)
-            if out:
-                break
+            for q in queries:
+                links, _new = await self._finder_links(finder, f"{q} {shop}".strip(), product, skip)
+                for item in links.get(retailer, []):
+                    if item["url"] and item["url"] not in [x["url"] for x in out]:
+                        out.append(item)
+                if out:
+                    return out
         return out
 
     async def _verify(self, retailer: str, url: str, product: dict[str, Any]) -> str:
@@ -667,6 +714,21 @@ class Fetcher:
         verdict, reason = product_match(product, parsed, url)
         self._trace(retailer, "page", url, t0, status, len(page or ""), url if verdict == "ok" else None,
                     None if verdict == "ok" else reason, product.get("id"))
-        if verdict == "ok" and wrong_product(product, parsed) is None:
+        self.page_info[url] = {"title": (parsed.title or "")[:300], "price": parsed.price, "image": parsed.image,
+                               "gtins": list(parsed.gtins), "mpn": parsed.mpn, "reason": reason}
+        if len(self.page_info) > 500:
+            for k in list(self.page_info)[:100]:
+                del self.page_info[k]
+        if wrong_product(product, parsed) is not None:
+            return "no"
+        if verdict == "ok":
             return "ok"
+        # may well be it: no other barcode on the page, no accessory, and the title covers at least half of the name
+        keys = {gtin_key(g) for g in parsed.gtins} - {None}
+        own = gtin_key(product.get("ean"))
+        if own and keys and own not in keys:
+            return "no"
+        score, missing = title_score(product.get("name"), product.get("brand"), parsed.title) if parsed.title else (0.0, [])
+        if parsed.title and score >= TITLE_DOUBT and not missing and not accessory_word(parsed.title, product.get("name")):
+            return "maybe"
         return "no"

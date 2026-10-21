@@ -486,6 +486,11 @@ details[open] .dfhint{display:none}.wsg{display:grid;grid-template-columns:max-c
 .preview{margin-top:14px;padding:14px;border:1px solid var(--ar-line);border-radius:14px;background:var(--ar-soft)}.pid{display:flex;gap:14px;align-items:flex-start}
 .pshops{display:flex;flex-wrap:wrap;gap:6px}.pshop{display:inline-flex;gap:6px;align-items:center;padding:5px 10px;border-radius:99px;border:1px solid var(--ar-line);background:var(--ar-card);cursor:pointer;font-size:13px}
 .pshop.on{border-color:var(--ar-green);background:color-mix(in srgb,var(--ar-green) 12%,var(--ar-card))}.pshop input{margin:0}
+.clist{display:flex;flex-direction:column;gap:8px;margin-top:10px}.crow{display:grid;grid-template-columns:52px minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:8px;border:1px solid var(--ar-line);border-radius:12px;background:var(--ar-card)}
+.crow img,.crow .ph{width:52px;height:52px;object-fit:contain;border-radius:8px;background:#fff;display:grid;place-items:center;font-size:22px}
+.cprice{min-width:90px;text-align:right;font-variant-numeric:tabular-nums;flex:none}.cans{display:flex;gap:6px;flex:none}.cans .btn{white-space:nowrap}.crow{box-sizing:border-box;max-width:100%}.cprod .pid{display:flex;gap:12px;align-items:center}
+.wask{display:inline-block;margin-left:6px;font-size:11px;padding:2px 8px;border-radius:99px;background:color-mix(in srgb,var(--ar-yellow) 22%,var(--ar-card));color:var(--ar-text);cursor:pointer;text-decoration:none}
+@media (max-width:700px){.crow{grid-template-columns:52px minmax(0,1fr) auto}.cans{grid-column:1/-1;justify-content:flex-end}}
 @media (prefers-reduced-motion: reduce){*,*::before{animation:none!important;transition:none!important}.ln{stroke-dashoffset:0}}
 `;
 
@@ -493,7 +498,7 @@ details[open] .dfhint{display:none}.wsg{display:grid;grid-template-columns:max-c
 // labels are English source strings, translated with t() when rendered
 
 const SECTIONS = {
-  prices: { label: "🏷️ Prices", hint: "your products and their deals", subs: [["today", "Today"], ["all", "All products"], ["dset", "Deal settings"]] },
+  prices: { label: "🏷️ Prices", hint: "your products and their deals", subs: [["today", "Today"], ["confirm", "To confirm"], ["all", "All products"], ["dset", "Deal settings"]] },
   overview: { label: "📊 Overview", hint: "what it all costs", subs: [["cost", "Cost"], ["shops", "Shops"]] },
   log: { label: "📜 Logbook", hint: "checks, prices, errors", subs: [["all", "Everything"], ["checks", "Shop checks"], ["errors", "Open errors"]] },
   manage: { label: "⚙️ Manage", hint: "add, import, shops, settings", subs: [["add", "Add"], ["import", "Import"], ["links", "Link check"], ["notify", "Notifications"], ["shops", "Shops & jobs"], ["lab", "Parser lab"], ["settings", "Settings"], ["userscript", "Userscript"], ["backup", "Backup"], ["legal", "Legal"], ["about", "About ARGUS"]] },
@@ -674,7 +679,7 @@ class ArgusPanel extends HTMLElement {
     const alerts = steps.map((p) => `<button class="walert ${s.alert_pct === p ? "on" : ""}" data-alert="${p}" data-pid="${esc(s.id)}" style="--c:${alertTone(p)}" title="${esc(t("Tell me when it is {pct}% cheaper than usual", { pct: p }))}">−${p}%</button>`).join("");
     const hit = s.target_hit ? " hit" : "";
     return `<div class="wrow" style="--i:${i}" data-set="${esc(s.id)}" tabindex="0"><div class="wimg">${this.img(s)}</div>
-      <div class="wname"><b>${esc(s.name || s.ean || s.id)}</b><div class="muted">${[s.brand, CATEGORY_ICONS[s.category] + " " + this.catName(s.category), s.priority ? "★".repeat(s.priority) : ""].filter(Boolean).map(esc).join(" · ")}</div>${this.badges(s) ? `<div class="badges inl">${this.badges(s)}</div>` : ""}</div>
+      <div class="wname"><b>${esc(s.name || s.ean || s.id)}</b>${(s.candidates || []).length ? ` <a class="wask" data-goto="prices/confirm" data-stop title="${esc(t("Found elsewhere: is it the same item?"))}">🔎 ${t("{n} to confirm", { n: s.candidates.length })}</a>` : ""}<div class="muted">${[s.brand, CATEGORY_ICONS[s.category] + " " + this.catName(s.category), s.priority ? "★".repeat(s.priority) : ""].filter(Boolean).map(esc).join(" · ")}</div>${this.badges(s) ? `<div class="badges inl">${this.badges(s)}</div>` : ""}</div>
       ${cheapest}<div class="wstrip">${strip || `<span class="muted">–</span>`}</div>
       <label class="wmax${hit}" data-stop>€ <input class="wtarget" data-pid="${esc(s.id)}" type="text" inputmode="decimal" autocomplete="off" data-money value="${s.target_price ?? ""}" placeholder="${t("max")}" title="${esc(t("The most it may cost: you get a message when it is at or below this price"))}">${s.target_hit ? " 🎯" : ""}</label>
       <div class="walerts" data-stop>${alerts}</div></div>`;
@@ -695,6 +700,36 @@ class ArgusPanel extends HTMLElement {
       save(b.dataset.pid, { alert_pct: off ? null : pct }, off ? t("Deal alert off") : t("You get a message when it is {pct}% cheaper than usual", { pct }));
     }));
     this.shadowRoot.querySelectorAll("[data-view]").forEach((c) => c.onclick = () => { this.state.view = c.dataset.view; this.persist(); this.renderContent(); });
+    root.querySelectorAll(".wask[data-goto]").forEach((el) => { el.onclick = (e) => { e.stopPropagation(); const [a, b] = el.dataset.goto.split("/");
+      this.state.section = a; this.state.sub[a] = b; this.closeDialog(true); this.resetFilters(); this.persist(); this.render(true); }; });
+  }
+  /** Prices → To confirm: everywhere ARGUS met a product, waiting for your yes or no. */
+  vConfirm() {
+    const list = this.products.filter((p) => (p.candidates || []).length);
+    const how = { ean: "▥ " + t("found by barcode"), name: "🔤 " + t("found by name"), web: "🌐 " + t("found by web search"), agg: "⚖ " + t("found at a price-comparison site"),
+      ident: "▥ " + t("found while looking up the barcode"), relay: "ⓤ " + t("found by your browser") };
+    const intro = `<div class="panel"><h3>🔎 ${t("Found elsewhere: is it the same item?")}</h3><p>${t("ARGUS keeps searching for every product in all its shops (by barcode, name, brand, model and combinations of those). Everything it finds waits here until you answer. Yes: from then on its price is watched and counts for the charts, deals and alerts. No: never asked again, ARGUS searches that shop further.")}</p></div>`;
+    if (!list.length) return intro + this.emptyState("✅", t("Nothing to confirm right now. New finds appear here (and on your phone)."));
+    return intro + list.map((p) => `<div class="panel cprod"><div class="pid"><div class="wimg">${this.img(p)}</div>
+        <div style="flex:1;min-width:0"><b>${esc(p.name || p.ean || p.id)}</b><div class="muted" style="font-size:12px">${[p.brand, p.mpn, p.ean ? t("barcode {ean}", { ean: p.ean }) : ""].filter(Boolean).map(esc).join(" · ")}${p.best_price != null ? ` · ${t("now {price} at {shop}", { price: EUR(p.best_price), shop: esc(this.state.data.retailers[p.best_retailer] || "") })}` : ""}</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${p.candidates.length > 1 ? `<button class="btn sm" data-cand="${esc(p.id)}" data-ans="yes">✓ ${t("Yes, all")}</button><button class="btn ghost sm" data-cand="${esc(p.id)}" data-ans="no">✗ ${t("None")}</button>` : ""}</div></div>
+      <div class="clist">${p.candidates.map((c) => `<div class="crow">
+        ${c.image ? `<img src="${esc(thumb(c.image, 160))}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<span class="ph">🏪</span>`}
+        <div style="flex:1;min-width:0"><b>${esc(c.shop)}</b>${c.new_shop ? ` <span class="abadge" title="${esc(c.new_shop.domain)}">＋ ${t("new shop")}</span>` : ""} ${c.sure ? `<span class="lk ok">${t("barcode / model matches")}</span>` : `<span class="lk suspect">${t("looks alike")}</span>`}
+          <div style="font-size:13px">${esc(c.title || "")}</div>
+          <div class="muted" style="font-size:12px">${how[c.how] || ""}${c.via ? " · " + esc((MARKS[c.via] || {}).name || c.via) : ""} · ${ago(c.found)}${c.url ? ` · <a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${t("open")} ↗</a>` : ""}</div></div>
+        <div class="cprice">${c.price != null ? `<b>${EUR(c.price)}</b>${c.via ? cssMark(c.via) : ""}` : `<span class="muted">${t("no price yet")}</span>`}</div>
+        <div class="cans"><button class="btn sm" data-cand="${esc(p.id)}" data-rid="${esc(c.retailer)}" data-ans="yes">✓ ${t("Yes")}</button><button class="btn ghost sm" data-cand="${esc(p.id)}" data-rid="${esc(c.retailer)}" data-ans="no">✗ ${t("No")}</button></div></div>`).join("")}</div></div>`).join("");
+  }
+  bindConfirm(root) {
+    root.querySelectorAll("[data-cand]").forEach((b) => b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.busy(b, "…", async () => {
+        const r = await this._hass.callWS({ type: "argus/candidate", product: b.dataset.cand, answer: b.dataset.ans, ...(b.dataset.rid ? { retailer: b.dataset.rid } : {}) });
+        await this.load();
+        this.toast(b.dataset.ans === "yes" ? t("Confirmed: its price is watched from now on ({n})", { n: r.answered }) : t("Noted: not the same item ({n})", { n: r.answered }), "ok");
+      });
+    }));
   }
   /** Prices → Deal settings: when does a price count as a deal? */
   vDealSettings() {
@@ -758,14 +793,17 @@ class ArgusPanel extends HTMLElement {
     const shop = (x) => `<label class="pshop ${chosen.has(x.id) ? "on" : ""}"><input type="checkbox" class="a_shop" value="${esc(x.id)}" ${chosen.has(x.id) ? "checked" : ""}> ${esc(x.label)}${x.found ? ` <span class="ok" title="${esc(t("Found there already"))}">✓${x.price != null ? " " + EUR(x.price) : ""}</span>` : ""}</label>`;
     const sug = r.shops.filter((x) => x.suggested), rest = r.shops.filter((x) => !x.suggested);
     const eanNote = r.ean ? (r.ean_sure ? `✓ ${t("barcode {ean}", { ean: r.ean })}` : `⚠ ${t("barcode {ean} (not sure yet: only one page)", { ean: r.ean })}`) : `⚠ ${t("no barcode found yet: ARGUS keeps looking and searches by name meanwhile")}`;
-    return `<div class="preview"><div class="pid"><div class="img" style="width:96px;height:96px;display:grid;place-items:center">${this.img(r)}</div>
+    const help = r.url ? this.detailsHtml(r) : "";
+    return `${help}<div class="preview"><div class="pid"><div class="img" style="width:96px;height:96px;display:grid;place-items:center">${this.img(r)}</div>
         <div style="flex:1;min-width:0">${r.existing ? `<div class="muted" style="font-size:12px">${t("You already track this product: what you choose is added to it.")}</div>` : ""}
           <div class="form" style="margin:0"><label style="grid-column:1/-1">${t("Name")}<input id="a_name" value="${esc(r.name || "")}"></label>
           <label>${t("Barcode (EAN / ISBN)")}<input id="a_ean" inputmode="numeric" value="${esc(r.ean || "")}"></label>
+          <label>${t("Brand")}<input id="a_brand" value="${esc(r.brand || "")}"></label>
+          <label>${t("Type / model number")}<input id="a_mpn" value="${esc(r.mpn || "")}"></label>
           <label>${t("Category")}<select id="a_cat">${Object.entries(cats).map(([k, v]) => `<option value="${esc(k)}" ${r.category === k ? "selected" : ""}>${CATEGORY_ICONS[k] || ""} ${esc(t(v))}</option>`).join("")}</select></label></div>
           <div class="muted" style="font-size:12px;margin-top:4px">${[r.brand, eanNote, r.price != null ? EUR(r.price) : ""].filter(Boolean).join(" · ")}</div></div></div>
       <h4 style="margin:14px 0 6px">🏪 ${t("Which shops should ARGUS watch?")}</h4>
-      <p class="muted" style="font-size:13px;margin:0 0 6px">${t("Suggested for {category}: the shops that sell this kind of product. Tick or untick as you like; shops ARGUS discovers later through comparison sites are added by themselves.", { category: `<b>${esc(this.catName(r.category))}</b>` })}</p>
+      <p class="muted" style="font-size:13px;margin:0 0 6px">${t("Suggested for {category}: the shops that sell this kind of product. Tick or untick as you like. Everywhere ARGUS finds the item it asks you first whether it is the same item; only then its price counts.", { category: `<b>${esc(this.catName(r.category))}</b>` })}</p>
       <div class="pshops">${sug.map(shop).join("") || `<span class="muted">${t("no shops yet")}</span>`}</div>
       ${rest.length ? `<details style="margin-top:6px"><summary class="muted" style="cursor:pointer">${t("Other shops ({n})", { n: rest.length })}</summary><div class="pshops" style="margin-top:6px">${rest.map(shop).join("")}</div></details>` : ""}
       <h4 style="margin:14px 0 6px">🔔 ${t("When do you want to hear about it?")}</h4>
@@ -773,6 +811,65 @@ class ArgusPanel extends HTMLElement {
         <div style="grid-column:span 2"><div class="muted" style="font-size:13px;margin-bottom:4px">${t("Tell me when it is suddenly cheaper than usual")}</div><div class="walerts">${steps.map((p) => `<button class="walert ${pv.alert === p ? "on" : ""}" data-aalert="${p}" style="--c:${alertTone(p)}" type="button">−${p}%</button>`).join("")}</div></div>
         <label>${t("Priority")}<select id="a_prio">${[0, 1, 2, 3].map((p) => `<option value="${p}">${p ? "★".repeat(p) : "–"}</option>`).join("")}</select></label></div>
       <div style="margin-top:12px"><button class="btn" id="a_go">＋ ${t("Add and watch")}</button> <button class="btn ghost" id="a_reset" type="button">${t("Start again")}</button></div></div>`;
+  }
+  /** The page could not be read (or too little is known to search surely): ask for the details, or for the page source. */
+  detailsHtml(r) {
+    const pv = this.state.addPreview || {}, dt = pv.details || {};
+    const open = r.needs_details;
+    return `<details class="panel needs" ${open ? "open" : ""} style="margin-top:12px;${open ? "border-color:var(--ar-yellow)" : ""}">
+      <summary style="cursor:pointer;font-weight:600">${open ? "⚠️ " + t("ARGUS could not read enough from this page") : "✎ " + t("Add details or the page source")}</summary>
+      ${r.error ? `<p class="err" style="font-size:13px">${esc(tx(r.error))}</p>` : ""}
+      <p style="font-size:13px">${t("The more ARGUS knows, the surer it finds the same item elsewhere. The barcode (EAN) is the best: it is the same in every shop. Fill in what you know (often on the page under “specifications”), or give the page source.")}</p>
+      <div class="form"><label>${t("Barcode (EAN / ISBN)")}<input id="d_ean" inputmode="numeric" value="${esc(dt.ean || "")}" placeholder="4548736132580"></label>
+        <label>${t("Product name")}<input id="d_name" value="${esc(dt.name || "")}" placeholder="Sony WH-1000XM5"></label>
+        <label>${t("Brand")}<input id="d_brand" value="${esc(dt.brand || "")}" placeholder="Sony"></label>
+        <label>${t("Type / model number")}<input id="d_mpn" value="${esc(dt.mpn || "")}" placeholder="WH1000XM5B"></label>
+        <label>${t("Product number at this shop")}<input id="d_sku" value="${esc(dt.sku || "")}" placeholder="9300000123456789"></label></div>
+      <h4 style="margin:12px 0 4px">📄 ${t("Or give the page source")}</h4>
+      <ol style="font-size:13px;margin:0 0 8px;padding-left:20px">
+        <li>${t("Open the product page in your browser on a computer.")}</li>
+        <li>${t("Press Ctrl+U (Mac: ⌥⌘U), or right-click on the page → “View page source”.")}</li>
+        <li>${t("In the tab that opens: Ctrl+A (select all), Ctrl+C (copy), and paste it below with Ctrl+V.")}</li>
+        <li>${t("Or save the page: Ctrl+S → “Webpage, HTML only” → choose that file below.")}</li></ol>
+      <p class="muted" style="font-size:12px;margin:0 0 6px">${t("The page source stays on your Home Assistant; ARGUS only reads the product details from it (name, barcode, brand, model, price, picture).")}</p>
+      <textarea id="d_src" rows="4" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px" placeholder="&lt;!DOCTYPE html&gt;…">${esc(pv.html ? t("(page source pasted: {kb} KB)", { kb: Math.round(pv.html.length / 1024) }) : "")}</textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px"><label class="btn ghost sm" style="cursor:pointer">📂 ${t("Choose the saved page (.html)")}<input type="file" id="d_file" accept=".html,.htm,text/html" hidden></label>
+        <button class="btn" id="d_go" type="button">🔎 ${t("Look up again")}</button></div></details>`;
+  }
+  /** A page source rides in one websocket message (Home Assistant takes at most 4 MB): drop what never holds product
+   *  details (comments, styles, pictures; then scripts other than JSON data) until it fits, else null. */
+  slimSource(h) {
+    const fits = (x) => new TextEncoder().encode(x).length <= 3_400_000;
+    if (!h || fits(h)) return h;
+    h = h.replace(/<!--[\s\S]*?-->/g, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<svg[\s\S]*?<\/svg>/gi, "");
+    if (!fits(h)) h = h.replace(/<script(?![^>]*json)[^>]*>[\s\S]*?<\/script>/gi, "");
+    return fits(h) ? h : null;
+  }
+  bindDetails(root, $) {
+    const s = this.state, pv = s.addPreview; if (!$("d_go")) return;
+    const src = $("d_src");
+    src.addEventListener("focus", () => { if (pv.html && src.value.startsWith("(")) src.value = ""; });
+    $("d_file").addEventListener("change", async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      if (f.size > 5_000_000) return this.toast(t("The file is too large (at most {mb} MB).", { mb: 5 }), "err");
+      pv.html = this.slimSource(await f.text());
+      if (!pv.html) return this.toast(t("The file is too large (at most {mb} MB).", { mb: 3 }), "err");
+      src.value = t("(page source pasted: {kb} KB)", { kb: Math.round(pv.html.length / 1024) });
+    });
+    $("d_go").addEventListener("click", () => {
+      const v = (id) => ($(id) || {}).value?.trim?.() || "";
+      if (src.value && !src.value.startsWith("(")) pv.html = this.slimSource(src.value);
+      if (src.value && !pv.html) return this.toast(t("The file is too large (at most {mb} MB).", { mb: 3 }), "err");
+      pv.details = { name: v("d_name"), brand: v("d_brand"), mpn: v("d_mpn"), sku: v("d_sku"), ean: v("d_ean").replace(/\D/g, "") };
+      if (pv.details.ean && !/^\d{8,14}$/.test(pv.details.ean)) return this.toast(t("The barcode (EAN/ISBN) is not valid."), "err");
+      this.busy($("d_go"), t("Looking it up… (a few shops and comparison sites)"), async () => {
+        const details = Object.fromEntries(Object.entries(pv.details).filter(([, x]) => x));
+        const res = await this._hass.callWS({ type: "argus/product/preview", url: pv.res.url, html: pv.html || "", details });
+        pv.res = res; pv.chosen = null;
+        $("a_preview").innerHTML = this.previewHtml(res); this.bindPreview(root, $);
+        if (!res.needs_details) this.toast(t("Thanks, that is enough to search surely."), "ok");
+      });
+    });
   }
   bindAdd(root, $) {
     const s = this.state, qi = $("a_q"); if (!qi) return;
@@ -795,6 +892,7 @@ class ArgusPanel extends HTMLElement {
   }
   bindPreview(root, $) {
     const s = this.state, pv = s.addPreview;
+    this.bindDetails(root, $);
     root.querySelectorAll(".a_shop").forEach((c) => c.addEventListener("change", () => { c.checked ? pv.chosen.add(c.value) : pv.chosen.delete(c.value); c.closest(".pshop").classList.toggle("on", c.checked); }));
     root.querySelectorAll("[data-aalert]").forEach((b) => b.addEventListener("click", () => { const p = +b.dataset.aalert; pv.alert = pv.alert === p ? null : p; root.querySelectorAll("[data-aalert]").forEach((x) => x.classList.toggle("on", +x.dataset.aalert === pv.alert)); }));
     $("a_cat").addEventListener("change", (e) => {          // another kind of product: other suggested shops
@@ -807,7 +905,9 @@ class ArgusPanel extends HTMLElement {
       const v = (id) => ($(id) || {}).value?.trim?.() || "", r = pv.res;
       const d = { type: "argus/add_product", url: r.url || "", name: v("a_name") || r.name || "", category: v("a_cat"), shops: [...pv.chosen] };
       if (v("a_ean")) d.ean = v("a_ean").replace(/\D/g, "");
-      if (r.brand) d.brand = r.brand; if (r.mpn) d.mpn = r.mpn; if (r.image) d.image = r.image;
+      d.brand = v("a_brand") || r.brand || undefined; d.mpn = v("a_mpn") || r.mpn || undefined;
+      if (r.image) d.image = r.image; if (r.sku) d.sku = r.sku; if (pv.html) d.html = pv.html;
+      for (const k of ["brand", "mpn"]) if (!d[k]) delete d[k];
       if (v("a_target")) { const x = +money(v("a_target")); if (!(x > 0)) return this.toast(t("Invalid price"), "err"); d.target_price = x; }
       if (pv.alert) d.alert_pct = pv.alert;
       if (+v("a_prio")) d.priority = +v("a_prio");
@@ -941,6 +1041,7 @@ class ArgusPanel extends HTMLElement {
     // add: address, name or barcode → look it up → choose shops → add
     this.bindAdd(root, $);
     this.bindWatch(root);
+    this.bindConfirm(root);
     // header-style action buttons inside content (Shops & jobs)
     root.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => this.startJob(b.dataset.act, b)));
     // shop pause: resume one ("") = all
@@ -1508,6 +1609,7 @@ class ArgusPanel extends HTMLElement {
     let n = 0;
     if (sec === "prices" && sub === "today") n = d.products.filter((s) => this.isDeal(s)).length;
     if (sec === "prices" && sub === "all") n = d.products.length;
+    if (sec === "prices" && sub === "confirm") n = d.products.reduce((a, s) => a + (s.candidates || []).length, 0);
     if (sec === "manage" && sub === "shops") n = Object.keys(d.paused || {}).length;
     if (sec === "log" && sub === "errors") n = this.errorRows().length;
     if (sec === "manage" && sub === "links") n = d.products.reduce((a, s) => a + (s.offers_suspect || 0), 0);
@@ -1523,7 +1625,7 @@ class ArgusPanel extends HTMLElement {
     const s = this.state, el = this.shadowRoot.getElementById("content"); if (!el) return;
     if (s.err) { el.innerHTML = `<div class="empty"><span class="big">⚠️</span>${t("Could not load data: {error}", { error: esc(s.err) })}<br><br><button class="btn" id="retry">${t("Try again")}</button></div>`; el.querySelector("#retry").onclick = () => this.load(true); return; }
     if (!s.data) { el.innerHTML = `<div class="kpis">${"<div class='skel' style='height:86px'></div>".repeat(4)}</div><div class="grid">${"<div class='skel' style='height:260px'></div>".repeat(8)}</div>`; return; }
-    const view = { prices: { today: this.vToday, all: this.vAll, dset: this.vDealSettings }, overview: { cost: this.vCost, shops: this.vShopsOverview }, log: { all: this.vLog, checks: this.vLog, errors: this.vErrors }, manage: { notify: this.vNotify, add: this.vAdd, import: this.vImport, links: this.vLinks, shops: this.vShops, lab: this.vLab, settings: this.vSettings, userscript: this.vUserscript, backup: this.vBackup, legal: this.vLegal, about: this.vAbout, secret: this.vSecret } }[s.section][s.sub[s.section]];
+    const view = { prices: { today: this.vToday, confirm: this.vConfirm, all: this.vAll, dset: this.vDealSettings }, overview: { cost: this.vCost, shops: this.vShopsOverview }, log: { all: this.vLog, checks: this.vLog, errors: this.vErrors }, manage: { notify: this.vNotify, add: this.vAdd, import: this.vImport, links: this.vLinks, shops: this.vShops, lab: this.vLab, settings: this.vSettings, userscript: this.vUserscript, backup: this.vBackup, legal: this.vLegal, about: this.vAbout, secret: this.vSecret } }[s.section][s.sub[s.section]];
     el.className = animate && !REDUCED ? "enter" : "";
     el.innerHTML = view.call(this);
     this.bindContent(el);

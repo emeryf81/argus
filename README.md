@@ -16,17 +16,23 @@ through [HACS](https://hacs.xyz/)) and runs entirely on your own installation.
 
 ## How it works
 
-1. **Type what you want to watch** — the address of a product page (bol.com, Amazon, Fnac…), a **name**
+1. **Give a link to the product** (bol.com, Amazon, Fnac…) — or a **name**
    (`Sony WH-1000XM5`) or a **barcode** (`4548736132580`). ARGUS looks it up first: from a name it finds the barcode
    (trusted when two pages agree), from a barcode the name, brand and picture. From then on everything is searched by
-   barcode, which is the same at every shop.
+   barcode, which is the same at every shop. The shop of your link is watched from the start.
+   **If the page can't be read** (blocked, built with JavaScript, no barcode), ARGUS asks you for the details — barcode
+   (EAN), name, brand, type/model number, the shop's product number — or for the **page source**: open the page on a
+   computer, press `Ctrl+U` (Mac `⌥⌘U`), then `Ctrl+A`, `Ctrl+C` and paste it in ARGUS; or save it with `Ctrl+S` →
+   *Webpage, HTML only* and choose that file. The source stays on your Home Assistant; only the product details are read.
 2. ARGUS **suggests which of your shops to watch for this kind of product** — electronics at Amazon, Krëfel, Fnac,
    Vanden Borre, MediaMarkt…; books at Fnac, Standaard Boekhandel, bol…; it never looks for headphones at a bookshop. You
    tick or untick, and set a **maximum price** and/or a **deal alert** (“tell me when it is suddenly 10 / 20 / 30 / 40 /
    50 % cheaper than usual”).
-3. It finds the product's page at each of those shops (see below). Every candidate is **verified** before it is linked:
-   the barcode on the page must match, otherwise the title must cover the product's name and model number, and it must
-   not be an accessory (case, cable, spare part…) or a far-too-cheap lookalike.
+3. It searches the product at every other shop, in many ways: by **barcode (EAN)** first, then by brand + model
+   number, model number alone, the name, brand + the first words of the name, the shop's own product number, and through
+   comparison sites and web search. Every candidate is **verified** (barcode, model number, title, no accessory or
+   far-too-cheap lookalike) and then **asked to you first** — see *Confirming finds* below. Nothing counts before you
+   say yes. This search is repeated every day for every product, so new shops are picked up later too.
 4. Every product is checked once per cycle at every shop, spread over the day so the shops are not hammered. Comparison
    sites are asked too (twice a day): their offers fill the gaps.
 5. Your **watch list** shows per product where it is cheapest and for how much, every shop coloured from **green (cheap)
@@ -43,9 +49,23 @@ shop, the price they show and the service that shows it:
   shows, marked with the service's letter in a circle — **ⓢ** Shoparize, **ⓟ** Producthero, **ⓒ** Channable,
   **ⓚ** Kelkoo, **ⓘ** idealo, **ⓖ** Google Shopping, **ⓜ** Bing Shopping… (prices from your own browser keep **ⓤ**).
   The shop's own page always wins as soon as it can be read; a comparison price older than 3 days is not used.
-- **Shops you don't have yet** that sell the product (with a matching title or found by barcode) are **added to your list
-  by themselves**, with their price ("new shop found via Producthero: …"). You can switch them off under *Manage →
-  Settings → Shops*.
+- **Shops you don't have yet** that sell the product are proposed as a find to confirm ("+ new shop"); they are only
+  added to your list when you say yes.
+
+### Confirming finds
+
+Every time ARGUS meets the product somewhere else — at one of your shops, at a comparison site or at a shop you don't
+have yet — it asks you whether it is the same item:
+
+- **On your phone** (Home Assistant app): **one message per product per search round**, e.g. *“3 possible matches for
+  Sony WH-1000XM5”*, with buttons **✓ Yes, all** / **✗ None** / **Open**. Other targets get a persistent notification with
+  a link to the panel.
+- **In the panel**: *Prices → To confirm* lists every waiting find per product with shop, title, price, how it was found
+  and whether the barcode/model matches, with **Yes** / **No** per shop or for all at once.
+
+**Yes**: from then on that shop's price is watched and counts for the price history, charts, deal score and alerts.
+**No**: that page is never asked again, and ARGUS keeps searching that shop. You can switch the *“Found elsewhere”*
+notification off in the notification rules.
 
 ### Discovery methods
 
