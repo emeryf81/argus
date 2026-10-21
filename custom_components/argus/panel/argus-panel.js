@@ -700,6 +700,8 @@ class ArgusPanel extends HTMLElement {
       save(b.dataset.pid, { alert_pct: off ? null : pct }, off ? t("Deal alert off") : t("You get a message when it is {pct}% cheaper than usual", { pct }));
     }));
     this.shadowRoot.querySelectorAll("[data-view]").forEach((c) => c.onclick = () => { this.state.view = c.dataset.view; this.persist(); this.renderContent(); });
+    root.querySelectorAll(".wask[data-goto]").forEach((el) => { el.onclick = (e) => { e.stopPropagation(); const [a, b] = el.dataset.goto.split("/");
+      this.state.section = a; this.state.sub[a] = b; this.closeDialog(true); this.resetFilters(); this.persist(); this.render(true); }; });
   }
   /** Prices → To confirm: everywhere ARGUS met a product, waiting for your yes or no. */
   vConfirm() {
@@ -834,6 +836,15 @@ class ArgusPanel extends HTMLElement {
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px"><label class="btn ghost sm" style="cursor:pointer">📂 ${t("Choose the saved page (.html)")}<input type="file" id="d_file" accept=".html,.htm,text/html" hidden></label>
         <button class="btn" id="d_go" type="button">🔎 ${t("Look up again")}</button></div></details>`;
   }
+  /** A page source rides in one websocket message (Home Assistant takes at most 4 MB): drop what never holds product
+   *  details (comments, styles, pictures; then scripts other than JSON data) until it fits, else null. */
+  slimSource(h) {
+    const fits = (x) => new TextEncoder().encode(x).length <= 3_400_000;
+    if (!h || fits(h)) return h;
+    h = h.replace(/<!--[\s\S]*?-->/g, "").replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<svg[\s\S]*?<\/svg>/gi, "");
+    if (!fits(h)) h = h.replace(/<script(?![^>]*json)[^>]*>[\s\S]*?<\/script>/gi, "");
+    return fits(h) ? h : null;
+  }
   bindDetails(root, $) {
     const s = this.state, pv = s.addPreview; if (!$("d_go")) return;
     const src = $("d_src");
@@ -841,11 +852,14 @@ class ArgusPanel extends HTMLElement {
     $("d_file").addEventListener("change", async (e) => {
       const f = e.target.files[0]; if (!f) return;
       if (f.size > 5_000_000) return this.toast(t("The file is too large (at most {mb} MB).", { mb: 5 }), "err");
-      pv.html = await f.text(); src.value = t("(page source pasted: {kb} KB)", { kb: Math.round(pv.html.length / 1024) });
+      pv.html = this.slimSource(await f.text());
+      if (!pv.html) return this.toast(t("The file is too large (at most {mb} MB).", { mb: 3 }), "err");
+      src.value = t("(page source pasted: {kb} KB)", { kb: Math.round(pv.html.length / 1024) });
     });
     $("d_go").addEventListener("click", () => {
       const v = (id) => ($(id) || {}).value?.trim?.() || "";
-      if (src.value && !src.value.startsWith("(")) pv.html = src.value;
+      if (src.value && !src.value.startsWith("(")) pv.html = this.slimSource(src.value);
+      if (src.value && !pv.html) return this.toast(t("The file is too large (at most {mb} MB).", { mb: 3 }), "err");
       pv.details = { name: v("d_name"), brand: v("d_brand"), mpn: v("d_mpn"), sku: v("d_sku"), ean: v("d_ean").replace(/\D/g, "") };
       if (pv.details.ean && !/^\d{8,14}$/.test(pv.details.ean)) return this.toast(t("The barcode (EAN/ISBN) is not valid."), "err");
       this.busy($("d_go"), t("Looking it up… (a few shops and comparison sites)"), async () => {

@@ -90,6 +90,10 @@ def async_register_websocket(hass: HomeAssistant) -> None:
     hass.http.register_view(RelayView())
 
 
+
+# a page source you paste rides in one websocket message (Home Assistant takes at most 4 MB): the panel slims it first
+PAGE_SOURCE_MAX = 3_500_000
+
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/overview"})
 @callback
 def ws_overview(hass, connection, msg):
@@ -134,7 +138,7 @@ def ws_overview(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/product/preview", vol.Optional("url", default=""): vol.All(str, vol.Length(max=2000)),
                                   vol.Optional("name", default=""): vol.All(str, vol.Length(max=200)),
                                   vol.Optional("ean", default=""): vol.All(str, vol.Length(max=40)),
-                                  vol.Optional("html", default=""): vol.All(str, vol.Length(max=5_000_000)),
+                                  vol.Optional("html", default=""): vol.All(str, vol.Length(max=PAGE_SOURCE_MAX)),
                                   vol.Optional("details", default={}): {vol.Optional(k): vol.All(str, vol.Length(max=200))
                                                                         for k in ("name", "brand", "mpn", "sku", "ean")}})
 @websocket_api.async_response
@@ -187,7 +191,7 @@ def ws_product(hass, connection, msg):
     vol.Optional("target_price"): vol.Any(None, vol.Coerce(float)), vol.Optional("priority"): vol.Any(None, int),
     vol.Optional("notes"): vol.All(str, vol.Length(max=500)), vol.Optional("shops"): [str],
     vol.Optional("alert_pct"): vol.Any(None, int), vol.Optional("image"): vol.Any(None, str),
-    vol.Optional("sku"): vol.All(str, vol.Length(max=100)), vol.Optional("html"): vol.All(str, vol.Length(max=5_000_000)),
+    vol.Optional("sku"): vol.All(str, vol.Length(max=100)), vol.Optional("html"): vol.All(str, vol.Length(max=PAGE_SOURCE_MAX)),
 })
 @websocket_api.async_response
 async def ws_add_product(hass, connection, msg):

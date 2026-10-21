@@ -143,8 +143,8 @@ class Fetcher:
         self._warmed: set[str] = set()
         self._harvest: dict[str, tuple[Any, ...]] = {}   # product -> (time, offers per shop, offers at other shops)
         self._harvest_locks: dict[str, asyncio.Lock] = {}
-        self.discover_quality: dict[str, str | None] = {}   # shop -> "ok" (surely the product) / "maybe" (you decide)
-        self._maybe: dict[str, tuple[str, str] | None] = {}
+        self.discover_quality: dict[tuple[str, str | None], str | None] = {}   # (shop, product) -> "ok" (surely) / "maybe" (you decide)
+        self._maybe: dict[tuple[str, str | None], tuple[str, str] | None] = {}
         self.page_info: dict[str, dict[str, Any]] = {}       # address -> what its page said (title, price, picture…)
         self._locks: dict[str, asyncio.Lock] = {}
         self.min_delay = 4.0
@@ -441,8 +441,9 @@ class Fetcher:
         """Every method in turn; a page that surely is the product ends the search, a page that may well be it (title
         close enough, no other barcode, no accessory) is kept as the answer when nothing surer turns up: you confirm it."""
         self.discover_error[retailer] = None
-        self.discover_quality[retailer] = None
-        self._maybe[retailer] = None
+        key = (retailer, product.get("id"))               # per product: several products may be searched at once
+        self.discover_quality.pop(key, None)
+        self._maybe.pop(key, None)
         ean = gtin_key(product.get("ean")) and (product.get("ean") or "").strip()
         shop_ean = ("ean", u) if not url and ean and (u := search_address(retailer, None, ean)) else None
         names: list[tuple[str, str]] = [("name", url)] if url else []
@@ -458,11 +459,11 @@ class Fetcher:
 
         def done(found: str | None, how: str | None) -> tuple[str | None, str | None]:
             if found:
-                self.discover_quality[retailer] = "ok"
+                self.discover_quality[key] = "ok"
                 return found, how
-            if self._maybe.get(retailer):
-                self.discover_quality[retailer] = "maybe"
-                return self._maybe[retailer]
+            if self._maybe.get(key):
+                self.discover_quality[key] = "maybe"
+                return self._maybe.pop(key)
             return None, None
 
         if shop_ean:
@@ -476,8 +477,8 @@ class Fetcher:
                     verdict = await self._verify(retailer, cand["url"], product)
                     if verdict == "ok":
                         return done(cand["url"], how)
-                    if verdict == "maybe" and not self._maybe.get(retailer):
-                        self._maybe[retailer] = (cand["url"], how)
+                    if verdict == "maybe" and not self._maybe.get((retailer, product.get("id"))):
+                        self._maybe[(retailer, product.get("id"))] = (cand["url"], how)
                     if verdict == "blocked":
                         return done(None, None)
         for how, search_url in names:
@@ -519,8 +520,8 @@ class Fetcher:
             verdict = await self._verify(retailer, cand["url"], product)
             if verdict == "ok":
                 return cand["url"], False
-            if verdict == "maybe" and not self._maybe.get(retailer):
-                self._maybe[retailer] = (cand["url"], how)
+            if verdict == "maybe" and not self._maybe.get((retailer, product.get("id"))):
+                self._maybe[(retailer, product.get("id"))] = (cand["url"], how)
             if verdict == "blocked":
                 return None, True
         self.discover_error[retailer] = T("no matching product found") if (product.get("name") or "")[:12].lower() in page.lower() \

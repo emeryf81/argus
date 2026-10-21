@@ -686,7 +686,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         for rid, (url, how) in zip(todo, results):
             if url and url_key(rid, url) not in rejected:
                 info = self.fetcher.page_info.get(url) or {}
-                if self._add_candidate(pid, rid, {"url": url, "how": how, "sure": self.fetcher.discover_quality.get(rid) == "ok",
+                if self._add_candidate(pid, rid, {"url": url, "how": how, "sure": self.fetcher.discover_quality.pop((rid, pid), None) == "ok",
                                                   "title": info.get("title"), "price": info.get("price"), "image": info.get("image"),
                                                   "gtins": info.get("gtins") or []}):
                     found += 1
@@ -791,6 +791,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if source not in ("relay", "userscript"):
             try:
                 await self.finder_round(pid)
+                await self.notify_candidates(pid)
             except Exception:  # noqa: BLE001 - the shops themselves are still checked
                 _LOGGER.exception("comparison sites failed for %s", pid)
         offers = [(rid, o) for rid, o in self.store["offers"].get(pid, {}).items()
@@ -1889,6 +1890,9 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self.log("info", "link", T("not the same item at {shop}: never asked again", shop=cand["shop"]),
                          product=pid, retailer=rid, url=cand.get("url"), source=source)
                 continue
+            cur = (self.store["offers"].get(pid) or {}).get(rid) or {}
+            if cur.get("url") and (cur.get("manual_url") or url_key(rid, cur["url"]) != cand["key"]):
+                continue                                   # a link was set meanwhile (by you or a surer find): it stays
             if (ns := cand.get("new_shop")):
                 from .shops import set_auto_shops
 
@@ -2001,7 +2005,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ident["pages"] = [{"retailer": rid, "url": url, "price": parsed.price if parsed else None,
                                "title": (parsed.title or "")[:200] if parsed else "", "gtins": list(parsed.gtins) if parsed else []}]
             ident["ean_sure"] = bool(ident.get("ean"))
-            if not ident.get("ean") and ident.get("name") and not error:
+            if not ident.get("ean") and ident.get("name") and (not error or details):
                 more = await self.fetcher.identify(ident["name"], None, ident.get("brand"))
                 if more.get("ean"):
                     ident["ean"], ident["ean_sure"] = more["ean"], more.get("ean_sure", False)
@@ -2028,7 +2032,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                "mpn": ident.get("mpn"), "sku": ident.get("sku"), "image": ident.get("image"), "price": ident.get("price"),
                "category": category, "pages": ident.get("pages") or [], "shops": shops,
                # the page couldn't be read, or too little is known to search surely: ask for details or the page source
-               "needs_details": bool(error) or not (ident.get("name") or name) or not (ident.get("ean") or ident.get("mpn"))}
+               "needs_details": (bool(error) and not details) or not (ident.get("name") or name) or not (ident.get("ean") or ident.get("mpn"))}
         self._previews[pid] = (time.time(), res)
         return res
 
@@ -2065,8 +2069,8 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def remove_product(self, pid: str) -> None:
         pid = normalize_product_id(pid)
         name = self._product(pid).get("name")
-        for key in ("products", "offers", "rejected"):
-            self.store[key].pop(pid, None)
+        for key in ("products", "offers", "rejected", "candidates"):
+            self.store.get(key, {}).pop(pid, None)
         if pid in self._first_checks:
             self._first_checks.remove(pid)
         self.log("info", "user", T("product removed: {name}", name=name or pid), source="panel")

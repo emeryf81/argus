@@ -687,6 +687,14 @@ async def test_finds_are_asked_once_per_product_with_buttons_and_a_no_is_final(h
     coord._add_candidate(pid, "vandenborre", {"url": "https://www.vandenborre.be/p/1", "how": "web", "title": HEADPHONES})
     assert coord.answer_token(f"ARGUS_YES_{tok}") == 1
     assert "fnac_be" in coord.store["offers"][pid] and set(coord.candidates(pid)[pid]) == {"vandenborre"}
+    # a link you set while a find waited stays: a later yes doesn't overwrite it
+    coord.store["offers"][pid]["vandenborre"] = {"url": "https://www.vandenborre.be/p/mine", "manual_url": True, "history": []}
+    assert coord.answer_candidate(pid, "vandenborre", True) == 1
+    assert coord.store["offers"][pid]["vandenborre"]["url"].endswith("/p/mine")
+    # removing the product forgets its finds too
+    coord._add_candidate(pid, "amazon_nl", {"url": "https://www.amazon.nl/dp/B0", "how": "web"})
+    coord.remove_product(pid)
+    assert pid not in coord.store.get("candidates", {})
 
 
 async def test_a_page_that_cannot_be_read_asks_for_details_or_its_source(hass: HomeAssistant, entry, world):
@@ -702,6 +710,7 @@ async def test_a_page_that_cannot_be_read_asks_for_details_or_its_source(hass: H
     # or the details you typed
     prev = await coord.preview_product(url, details={"name": "Sony WH-1000XM5", "brand": "Sony", "mpn": "WH1000XM5B", "sku": "9300001"})
     assert prev["name"] == "Sony WH-1000XM5" and prev["mpn"] == "WH1000XM5B" and prev["sku"] == "9300001"
+    assert prev["needs_details"] is False                     # what you filled in is enough, even though the page stays blocked
 
 
 def test_search_variants_combine_brand_model_and_name():

@@ -6,6 +6,7 @@ Rules live in the store (no reload needed) and are edited in the panel.
 """
 from __future__ import annotations
 
+import html as _html
 import logging
 import re
 import time
@@ -389,11 +390,12 @@ class Notifier:
         elif t["type"] == "notify":
             await call("notify", t["service"].split(".", 1)[1], {"title": title, "message": full}, blocking=True)
         elif t["type"] == "email":
-            html = (f"<h3>{title}</h3><p>{message.replace(chr(10), '<br>')}</p>"
-                    + (f'<p><a href="{url}">{tr("View in the shop")}</a></p>' if url else "")
-                    + (f'<img src="{image}" width="240">' if image else ""))
+            esc = _html.escape                              # shop titles and addresses come from web pages
+            body = (f"<h3>{esc(title)}</h3><p>{esc(message).replace(chr(10), '<br>')}</p>"
+                    + (f'<p><a href="{esc(url)}">{esc(tr("View in the shop"))}</a></p>' if url else "")
+                    + (f'<img src="{esc(image)}" width="240">' if image else ""))
             await call("notify", t["service"].split(".", 1)[1],
-                       {"title": title, "message": full, "target": t["to"], "data": {"html": html}}, blocking=True)
+                       {"title": title, "message": full, "target": t["to"], "data": {"html": body}}, blocking=True)
         elif t["type"] == "entity":
             await call("notify", "send_message", {"entity_id": t["entity_id"], "title": title, "message": full}, blocking=True)
         elif t["type"] == "tts":
