@@ -11,6 +11,7 @@ import logging
 import re
 import time
 import uuid
+from urllib.parse import quote
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -205,6 +206,13 @@ def product_triggers(rule: dict[str, Any], before: dict[str, Any], after: dict[s
     return out
 
 
+
+def _md_url(url: str | None) -> str | None:
+    """A web address as a Markdown link target: http(s) only, with brackets, parentheses and spaces encoded."""
+    if not url or not re.match(r"https?://", url, re.I):
+        return None
+    return quote(url, safe=":/?#@!$&'*+,;=%~")
+
 class Notifier:
     def __init__(self, coord: ArgusCoordinator) -> None:
         self.coord = coord
@@ -374,7 +382,7 @@ class Notifier:
         full = message + (f"\n{url}" if url and t["type"] in ("email", "notify", "entity") else "")
         if t["type"] == "persistent":
             await call("persistent_notification", "create",
-                       {"title": title, "message": message + (f"\n\n[{tr('Open')}]({url})" if url else "")
+                       {"title": title, "message": message + (f"\n\n[{tr('Open')}]({_md_url(url)})" if _md_url(url) else "")
                         + (f"\n\n[{tr('Answer in ARGUS')}](/{PANEL_URL})" if actions else ""),
                         **({"notification_id": notification_id} if notification_id else {})}, blocking=True)
         elif t["type"] == "mobile":
