@@ -131,7 +131,7 @@ async def test_add_product_by_url_reads_its_identity(hass: HomeAssistant, entry,
     assert p["name"] == HEADPHONES and p["brand"] == "Sony" and p["mpn"] == "WH1000XM5B" and p["image"] == "https://img.example/sony.jpg"
     offer = coord.store["offers"][res["id"]]["bol"]
     assert offer["url"] == "https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/"       # tracking parameters are gone
-    assert offer["last_price"] == 329.0 and offer["link_status"] == "ok"
+    assert offer["last_price"] == 329.0 and offer["link_status"] == "confirmed"      # the page you pointed at
     # the same product added again (even from another address) is the same product
     again = await coord.add_product("https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/")
     assert again["existing"] is True and len(coord.store["products"]) == 1
@@ -162,6 +162,10 @@ async def test_discovery_finds_the_product_at_the_other_shops_of_its_category(ha
     res = await coord.discover_product(pid)
     assert res["found"] == 2
     offers = coord.store["offers"][pid]
+    assert set(offers) == {"bol"}                                   # what was found waits for your answer
+    waiting = coord.candidates(pid)[pid]
+    assert set(waiting) == {"krefel", "vandenborre"} and waiting["krefel"]["price"] == 299.0
+    assert coord.answer_candidate(pid, None, True) == 2
     assert set(offers) == {"bol", "krefel", "vandenborre"}          # fnac and amazon are not searched here: no pages known → no link
     assert offers["krefel"]["found_via"] == "ean" and offers["vandenborre"]["found_via"] == "name"
     assert not any("hoesje" in o["url"] for o in offers.values())   # the accessory was never linked
@@ -187,6 +191,10 @@ async def test_first_check_searches_and_prices_a_new_product(hass: HomeAssistant
     assert pid in coord.first_checks
     await hass.async_block_till_done(wait_background_tasks=True)
     assert not coord._first_busy and coord.first_checks == []
+    assert coord.compute()["statuses"][pid]["best_retailer"] == "bol"           # nothing else counts before you answer
+    assert set(coord.candidates(pid)[pid]) == {"krefel", "vandenborre"}
+    coord.answer_candidate(pid, None, True)
+    await hass.async_block_till_done(wait_background_tasks=True)
     st = coord.compute()["statuses"][pid]
     assert st["best_retailer"] == "krefel" and st["offers_live"] == 3
     assert hass.states.get(f"sensor.argus_{pid}").state == "299.0"
@@ -288,18 +296,24 @@ async def test_websocket_panel_api(hass: HomeAssistant, entry, world, hass_ws_cl
     assert ov["shop_categories"]["krefel"] == ["electronics", "toys_games", "home_garden_diy"]
     await ws.send_json({"id": 3, "type": "argus/product/find", "product": pid})
     found = (await ws.receive_json())["result"]
-    assert found["result"]["found"] == 2 and set(found["product"]["offers"]) == {"bol", "krefel", "vandenborre"}
-    await ws.send_json({"id": 4, "type": "argus/product/refresh", "product": pid})
+    assert found["result"]["found"] == 2 and {c["retailer"] for c in found["product"]["candidates"]} == {"krefel", "vandenborre"}
+    await ws.send_json({"id": 4, "type": "argus/candidate", "product": pid, "retailer": "krefel", "answer": "yes"})
+    msg = await ws.receive_json()
+    assert msg["result"]["answered"] == 1, msg
+    await ws.send_json({"id": 5, "type": "argus/candidate", "product": pid, "answer": "yes"})
+    assert (await ws.receive_json())["result"]["answered"] == 1
+    await hass.async_block_till_done(wait_background_tasks=True)
+    await ws.send_json({"id": 6, "type": "argus/product/refresh", "product": pid})
     out = (await ws.receive_json())["result"]
     assert out["product"]["best_retailer"] == "krefel" and out["product"]["history"]["krefel"][0][1] == 299.0
-    await ws.send_json({"id": 5, "type": "argus/update_product", "product": pid, "fields": {"category": "nonsense"}})
+    await ws.send_json({"id": 7, "type": "argus/update_product", "product": pid, "fields": {"category": "nonsense"}})
     assert (await ws.receive_json())["success"] is False
-    await ws.send_json({"id": 6, "type": "argus/log", "product": pid})
+    await ws.send_json({"id": 8, "type": "argus/log", "product": pid})
     log = (await ws.receive_json())["result"]
     assert log["total"] > 0 and any(e["kind"] == "discover" for e in log["entries"])
-    await ws.send_json({"id": 7, "type": "argus/collection"})
+    await ws.send_json({"id": 9, "type": "argus/collection"})
     assert (await ws.receive_json())["result"]["summary"]["cost"] == 299.0
-    await ws.send_json({"id": 8, "type": "argus/remove_product", "product": pid})
+    await ws.send_json({"id": 10, "type": "argus/remove_product", "product": pid})
     assert (await ws.receive_json())["success"]
 
 
@@ -325,6 +339,8 @@ async def test_services(hass: HomeAssistant, entry, world):
     assert hass.states.get("sensor.argus_tracked_products").state == "1"
     found = await hass.services.async_call(DOMAIN, "find_shops", {"product": pid}, blocking=True, return_response=True)
     assert found["found"] == 2
+    coord.answer_candidate(pid, None, True)
+    await hass.async_block_till_done(wait_background_tasks=True)
     await hass.services.async_call(DOMAIN, "refresh", {"product": pid}, blocking=True, return_response=True)
     await hass.async_block_till_done()
     assert float(hass.states.get(f"sensor.argus_{pid}").state) == 299.0
@@ -382,8 +398,12 @@ async def test_relay_search_links_a_clearly_matching_result(hass: HomeAssistant,
     searches = [i for i in items["items"] if i.get("kind") == "search"]
     assert {i["retailer"] for i in searches} >= {"krefel", "vandenborre"} and items["counts"]["search"] >= 2
     html = search(("/nl/p/sony-wh-1000xm5-zwart/55/", "Sony WH-1000XM5 draadloze koptelefoon"), ("/nl/p/other/9/", "Andere koptelefoon"))
-    out = coord.relay_result({"kind": "search", "product": pid, "retailer": "krefel", "html": html, "status": 200, "url": "x"})
-    assert out["url"] == "https://www.krefel.be/nl/p/sony-wh-1000xm5-zwart/55/"
+    assert coord.relay_result({"kind": "search", "product": pid, "retailer": "krefel", "html": html, "status": 200, "url": "x"}) == "fail"
+    url = "https://www.krefel.be/nl/p/sony-wh-1000xm5-zwart/55/"
+    assert coord.candidates(pid)[pid]["krefel"]["url"] == url                   # the browser's find waits for your answer
+    coord.answer_candidate(pid, "krefel", True)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    out = {"url": url}
     assert coord.relay_result({"kind": "search", "product": pid, "retailer": "vandenborre", "html": "<html></html>", "status": 200}) == "fail"
     assert coord.relay_result({"product": pid, "retailer": "krefel", "url": out["url"], "price": 289.0,
                                "title": "Sony WH-1000XM5 draadloze koptelefoon"}) == "ok"
@@ -469,6 +489,8 @@ async def test_discovery_via_web_search_and_price_comparison_sites(hass: HomeAss
     coord = await setup(hass, entry)
     pid = (await coord.add_product("https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/", discover=False))["id"]
     res = await coord.discover_product(pid)
+    assert set(coord.candidates(pid)[pid]) == {"krefel", "vandenborre", "fnac_be"}
+    coord.answer_candidate(pid, None, True)
     offers = coord.store["offers"][pid]
     assert res["found"] == 3
     assert set(offers) == {"bol", "krefel", "vandenborre", "fnac_be"}
@@ -509,6 +531,9 @@ async def test_comparison_site_prices_with_service_mark_and_new_shops(hass: Home
     coord = await setup(hass, entry)
     pid = (await coord.add_product("https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/", discover=False))["id"]
     await coord.discover_product(pid)
+    waiting = coord.candidates(pid)[pid]
+    assert waiting["a_exellent_be"]["new_shop"]["domain"] == "exellent.be" and "a_exellent_be" not in coord.retailers   # asked first
+    coord.answer_candidate(pid, None, True)
     world.pages["bol.com/be/nl/p/sony-wh-1000xm5/9300001/"] = (403, "blocked")
     world.pages["exellent.be"] = (403, "blocked")
     coord.fetcher.reset_cooldowns()
@@ -539,7 +564,7 @@ async def test_add_by_name_finds_the_barcode_and_by_barcode_finds_the_name(hass:
     res = await coord.add_product(None, name=prev["name"], ean=prev["ean"], shops=["krefel", "vandenborre"], alert_pct=20, discover=False)
     p = coord.store["products"][res["id"]]
     assert p["shops"] == ["krefel", "vandenborre"] and p["alert_pct"] == 20
-    assert set(coord.store["offers"][res["id"]]) >= {"krefel"}                   # the pages that proved it are linked right away
+    assert "krefel" in coord.candidates(res["id"])[res["id"]]                    # the pages that proved it wait for your yes
     assert coord.shops_for(res["id"]) == ["krefel", "vandenborre"]              # only the shops you chose
 
 
@@ -589,6 +614,8 @@ async def test_tweakers_style_clickouts_give_prices_per_shop_name(hass: HomeAssi
     pid = (await coord.add_product("https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/", discover=False,
                                    shops=["bol", "krefel", "vandenborre"]))["id"]
     await coord.finder_round(pid, force=True)
+    assert coord.candidates(pid)[pid]["vandenborre"].get("url") is None            # a price at a shop, its page not known yet
+    coord.answer_candidate(pid, None, True)
     offers = coord.store["offers"][pid]
     assert offers["vandenborre"]["last_price"] == 284.0 and offers["vandenborre"]["last_via"] == "css:tweakers"
     assert offers["vandenborre"].get("url") is None                                  # price known, page not yet
@@ -624,3 +651,56 @@ async def test_auto_shops_check_the_address_and_stay_in_their_country(hass):
     finally:
         shops.STATE["country"] = "be"
         shops.set_auto_shops([])
+
+
+async def test_finds_are_asked_once_per_product_with_buttons_and_a_no_is_final(hass: HomeAssistant, entry, world):
+    """Every find waits for your answer: one push per product with Yes / No / Open buttons; the phone's button answers
+    them all, a no is never asked again and the shop is searched further."""
+    from homeassistant.core import ServiceCall
+
+    calls: list[ServiceCall] = []
+    hass.services.async_register("notify", "mobile_app_phone", lambda call: calls.append(call))
+    coord = await setup(hass, entry)
+    coord.store["notify_rules"][0]["targets"] = [{"type": "mobile", "service": "notify.mobile_app_phone"}]
+    pid = (await coord.add_product("https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/", discover=False))["id"]
+    await coord.discover_product(pid)
+    await hass.async_block_till_done()
+    asks = [c for c in calls if "candidates" not in str(c.data) and "2" in c.data["title"]]
+    assert len(asks) == 1                                                             # bundled: one message for 2 finds
+    msg = asks[0].data
+    assert "Krëfel" in msg["message"] or "krefel" in msg["message"].lower()
+    actions = msg["data"]["actions"]
+    assert [a["action"].split("_")[1] for a in actions[:2]] == ["YES", "NO"] and actions[2]["uri"] == "/argus"
+    # the phone's "No" button: none of them, never asked again
+    hass.bus.async_fire("mobile_app_notification_action", {"action": actions[1]["action"]})
+    await hass.async_block_till_done()
+    assert coord.candidates(pid)[pid] == {}
+    assert set(coord.store["offers"][pid]) == {"bol"}
+    coord.store["products"][pid]["discovered"] = 0
+    await coord.discover_product(pid)
+    assert coord.candidates(pid)[pid] == {}                                           # the same pages are not asked again
+    # a used or made-up code does nothing
+    assert coord.answer_token(actions[0]["action"]) == 0 and coord.answer_token("ARGUS_YES_000000000000") == 0
+
+
+async def test_a_page_that_cannot_be_read_asks_for_details_or_its_source(hass: HomeAssistant, entry, world):
+    url = "https://www.bol.com/be/nl/p/sony-wh-1000xm5/9300001/"
+    world.pages["bol.com/be/nl/p/sony-wh-1000xm5/9300001/"] = (403, "blocked")
+    coord = await setup(hass, entry)
+    prev = await coord.preview_product(url)
+    assert prev["needs_details"] is True and prev["error"]
+    # the page source you saved in your browser
+    src = page(HEADPHONES, 329.0, EAN, "WH1000XM5B")
+    prev = await coord.preview_product(url, html=src)
+    assert prev["needs_details"] is False and prev["ean"] == EAN and prev["name"] == HEADPHONES and prev["mpn"] == "WH1000XM5B"
+    # or the details you typed
+    prev = await coord.preview_product(url, details={"name": "Sony WH-1000XM5", "brand": "Sony", "mpn": "WH1000XM5B", "sku": "9300001"})
+    assert prev["name"] == "Sony WH-1000XM5" and prev["mpn"] == "WH1000XM5B" and prev["sku"] == "9300001"
+
+
+def test_search_variants_combine_brand_model_and_name():
+    from custom_components.argus.client import search_variants
+
+    v = search_variants({"name": "Sony WH-1000XM5 draadloze koptelefoon zwart", "brand": "Sony", "mpn": "WH1000XM5B", "sku": "9300001"})
+    assert v[0] == "Sony WH1000XM5B" and "WH1000XM5B" in v and "Sony WH-1000XM5 draadloze koptelefoon zwart" in v
+    assert "Sony WH-1000XM5 draadloze" in v and v[-1] == "9300001" and len(v) == len(set(v))

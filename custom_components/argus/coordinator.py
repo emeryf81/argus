@@ -29,7 +29,7 @@ from .const import (
     DEFAULT_DISCOUNT_THRESHOLD, DEFAULT_MIN_HISTORY_DAYS, DEFAULT_REFRESH_MODE, DEFAULT_REFRESH_TIMES, DEFAULT_RELAY_HOURS,
     DEFAULT_SEARCH, DEFAULT_SPREAD_HOURS, DOMAIN, EVENT_HIGH_DISCOUNT, EVENT_JOB_DONE, EVENT_NEW_LOW, EVENT_TARGET_HIT,
     FULL_REFRESH_GAP, GENERIC_SHOPS, MANUAL_GAP, PRODUCT_LIMIT, RETAILERS, STORAGE_KEY, STORAGE_VERSION, TICKER_DEFAULT,
-    TICKER_GOOD_SCORE, TICKER_RELOAD, WATCH_CYCLE_CHOICES, ALERT_STEPS, FINDER_PRICE_MAX_AGE, FINDER_ROUND_HOURS,
+    TICKER_GOOD_SCORE, TICKER_RELOAD, WATCH_CYCLE_CHOICES, ALERT_STEPS, REDISCOVER_HOURS, FINDER_PRICE_MAX_AGE, FINDER_ROUND_HOURS,
 )
 from .i18n import DEFAULT_LANGUAGE, LANGUAGES, LocalizedError, T, resolve, set_language
 from .models import (
@@ -637,13 +637,16 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return shops
 
     def _missing(self, pid: str, live: list[str]) -> list[str]:
+        """Shops of this product without a page yet, and without a find that waits for your answer."""
         offers = self.store["offers"].get(pid, {})
-        return [r for r in self.shops_for(pid, live) if r not in offers or not offers[r].get("url")]
+        waiting = (self.store.get("candidates") or {}).get(pid) or {}
+        return [r for r in self.shops_for(pid, live) if (r not in offers or not offers[r].get("url")) and r not in waiting]
 
     def _discover_due(self, pid: str, live: list[str]) -> bool:
-        """A product with shops that have no link yet is searched again about once a week (new shops, new stock)."""
+        """A product keeps being searched at the shops where it has no page yet: every day (new shops, new stock,
+        other words), until every shop has a confirmed page."""
         p = self.store["products"][pid]
-        return bool(self._missing(pid, live)) and time.time() - p.get("discovered", 0) > 7 * 86400
+        return bool(self._missing(pid, live)) and time.time() - p.get("discovered", 0) > REDISCOVER_HOURS * 3600
 
     async def _discover(self, rid: str, pid: str, force: bool = False, url: str | None = None) -> tuple[str | None, str | None]:
         skip = set(self.store.get("rejected", {}).get(pid, []))
@@ -682,11 +685,11 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         found = 0
         for rid, (url, how) in zip(todo, results):
             if url and url_key(rid, url) not in rejected:
-                self._set_discovered(self.store["offers"].setdefault(pid, {}), rid, url, how)
-                found += 1
-                self.log("ok", "discover", {"ean": T("link found by barcode"), "agg": T("link found via a price-comparison site"),
-                                            "web": T("link found via a web search")}.get(how or "", T("link found by name")),
-                         product=pid, retailer=rid, url=url)
+                info = self.fetcher.page_info.get(url) or {}
+                if self._add_candidate(pid, rid, {"url": url, "how": how, "sure": self.fetcher.discover_quality.get(rid) == "ok",
+                                                  "title": info.get("title"), "price": info.get("price"), "image": info.get("image"),
+                                                  "gtins": info.get("gtins") or []}):
+                    found += 1
             elif url:
                 self.log("info", "discover", T("found a link you rejected earlier; not linked again"), product=pid, retailer=rid, url=url)
             elif self.job and self.job.get("running"):
@@ -700,6 +703,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if url and self.job and self.job.get("running"):
                 self.job["shops"].setdefault(rid, {"ok": 0, "err": 0})["ok"] += 1
         found += await self.finder_round(pid, force=True)
+        await self.notify_candidates(pid)
         return {"found": found}
 
     @staticmethod
@@ -1060,9 +1064,12 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         found = next((c["url"] for c in cands if c["score"] >= TITLE_OK), None)
         offers = self.store["offers"].setdefault(pid, {})
         if found and not (offers.get(rid) or {}).get("url"):
-            offers[rid] = {"url": found, "history": [], "found": time.time(), "found_via": "relay"}
-            self.log("ok", "discover", T("link found by your browser"), product=pid, retailer=rid, url=found, source="relay")
-            return {"product": pid, "retailer": rid, "shop": RETAILERS[rid][0], "url": found, "reason": "no_price"}
+            title = next((c["title"] for c in cands if c["url"] == found), None)
+            if self._add_candidate(pid, rid, {"url": found, "how": "relay", "title": title}):
+                self.log("ok", "discover", T("link found by your browser"), product=pid, retailer=rid, url=found, source="relay")
+                if self.hass and self.entry:
+                    self.entry.async_create_background_task(self.hass, self.notify_candidates(pid), f"{DOMAIN}_ask_{pid}")
+            return "fail"
         why = (T("the shop blocked the search (HTTP {status})", status=status) if status in (403, 429, 503)
                else T("could not reach the shop: {error}", error=str(item.get("error") or "?")[:100]) if not status
                else T("search page: HTTP error {status}", status=status) if status >= 400
@@ -1626,7 +1633,8 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                           brand: str | None = None, mpn: str | None = None, category: str | None = None,
                           ref_price: float | None = None, target_price: float | None = None, priority: int | None = None,
                           notes: str | None = None, discover: bool = True, shops: list[str] | None = None,
-                          alert_pct: int | None = None, image: str | None = None) -> dict[str, Any]:
+                          alert_pct: int | None = None, image: str | None = None, sku: str | None = None,
+                          html: str | None = None) -> dict[str, Any]:
         """Add a product from the address of a product page at one of your shops: the page tells name, brand, barcode,
         model number and price, and ARGUS then looks the same product up at the other shops of its category.
         Without an address a name (and ideally a barcode) is enough: it is searched at the shops."""
@@ -1653,7 +1661,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise LocalizedError("First import the shop settings and accept their terms (Manage → Shops).")
             if not rid:
                 raise LocalizedError("This address is not on one of your shops. Add the shop first (Manage → Shops & jobs), or import a shop settings file that has it.")
-            parsed, error = await self.fetcher.fetch_offer(rid, url, force=True)
+            parsed, error = await self._read_page(rid, url, html)
         ident = product_identity(parsed, url) if parsed else {"name": clean_title(slug_title(url).title()) if url else "", "brand": None,
                                                               "ean": None, "mpn": None, "image": None, "price": None, "category": None}
         name = name or ident["name"] or (slug_title(url) if url else "")
@@ -1678,7 +1686,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             p["alert_pct"] = alert_pct
         if image and str(image).startswith("https://") and not p.get("image"):
             p["image"] = image
-        for key, val in (("name", name), ("brand", brand), ("mpn", mpn), ("notes", notes), ("ref_price", ref_price),
+        for key, val in (("name", name), ("brand", brand), ("mpn", mpn), ("sku", sku), ("notes", notes), ("ref_price", ref_price),
                          ("target_price", target_price), ("priority", priority)):
             if val not in (None, "") and (not existing or not p.get(key)):
                 p[key] = val
@@ -1687,7 +1695,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         offers = self.store["offers"].setdefault(pid, {})
         if url and rid and rid not in offers:
             offer: dict[str, Any] = {"url": url, "history": [], "found": time.time(), "found_via": "source",
-                                     "link_status": "ok", "link_reason": T("the address you added the product with")}
+                                     "link_status": "confirmed", "link_reason": T("the address you added the product with")}
             offers[rid] = offer
             if parsed:
                 offer["title"] = (parsed.title or "")[:300]
@@ -1703,16 +1711,10 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 record_price(offer, None, error=error)
         prev = self._previews.pop(pid, None)
         if prev and time.time() - prev[0] < 1800:
-            allowed = set(self.shops_for(pid))
             for page in prev[1].get("pages") or []:
-                r = page["retailer"]
-                if r in allowed and not (offers.get(r) or {}).get("url"):
-                    offers[r] = o = {"url": page["url"], "history": [], "found": time.time(), "found_via": "ident", "link_status": "ok",
-                                     "link_reason": T("the product page proved it is the same product"), "title": page.get("title"),
-                                     "gtins": page.get("gtins") or []}
-                    if page.get("price"):
-                        record_price(o, page["price"])
-                        o["last_ok"] = o["last_checked"]
+                if page["retailer"] != rid:
+                    self._add_candidate(pid, page["retailer"], {"url": page["url"], "how": "ident", "sure": True, "title": page.get("title"),
+                                                                "price": page.get("price"), "gtins": page.get("gtins") or []})
             p["identified"] = time.time()
         self.log("ok" if not error else "warning", "user",
                  (T("product already tracked: this shop was added") if existing else T("product added")) + (f" · {error}" if error else ""),
@@ -1753,18 +1755,12 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if res.get("category") and p.get("category") in (None, DEFAULT_CATEGORY):
             p["category"] = res["category"]
         offers = self.store["offers"].setdefault(pid, {})
-        allowed = set(self.shops_for(pid))
-        rejected = set(self.store.get("rejected", {}).get(pid, []))
         for page in res.get("pages") or []:
             rid = page["retailer"]
-            if rid not in allowed or (offers.get(rid) or {}).get("url") or url_key(rid, page["url"]) in rejected:
+            if (offers.get(rid) or {}).get("url"):
                 continue
-            offers[rid] = o = {"url": page["url"], "history": [], "found": time.time(), "found_via": "ident", "link_status": "ok",
-                               "link_reason": T("the product page proved it is the same product"), "title": page.get("title"),
-                               "gtins": page.get("gtins") or []}
-            if page.get("price"):
-                record_price(o, page["price"])
-                o["last_ok"] = o["last_checked"]
+            self._add_candidate(pid, rid, {"url": page["url"], "how": "ident", "sure": True, "title": page.get("title"),
+                                           "price": page.get("price"), "gtins": page.get("gtins") or []})
         self.push_update()
         return res
 
@@ -1789,22 +1785,21 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         rejected = set(self.store.get("rejected", {}).get(pid, []))
         now, new_links = time.time(), 0
         good = lambda i: i.get("price") and (i.get("by_ean") or i.get("score", 0) >= TITLE_OK)  # noqa: E731
-        auto = self.store.setdefault("auto_shops", {})
-        for item in others:
+        for item in others:                                # a shop you don't have yet: asked together with the find
             if not good(item):
                 continue
             rid = auto_shop_id(item["domain"])
-            if rid not in auto and len(auto) < MAX_AUTO_SHOPS:
-                name = (item.get("seller") or item["domain"].split(".")[0].replace("-", " ").title())[:40]
-                auto[rid] = {"id": rid, "name": name, "domain": item["domain"], "found_by": item.get("css") or item.get("finder"),
-                             "categories": [], "added": now, "country": STATE.get("country", "be")}
-                set_auto_shops(list(auto.values()))
-                self.log("ok", "shop", T("new shop found via {source}: {shop}", source=self.via_name(item.get("css") or item.get("finder")), shop=name),
-                         product=pid, retailer=rid, url=item["url"], source="server")
-            if rid in AUTO_SHOPS:                              # registered here (this country, a public shop)
+            if rid in AUTO_SHOPS or rid in self.store.get("auto_shops", {}):
                 by_shop.setdefault(rid, []).insert(0, item)
-                if p.get("shops") and rid not in p["shops"]:
-                    p["shops"].append(rid)
+                continue
+            if len(self.store.get("auto_shops") or {}) >= MAX_AUTO_SHOPS:
+                continue
+            name = (item.get("seller") or item["domain"].split(".")[0].replace("-", " ").title())[:40]
+            via = item.get("css") or item.get("finder")
+            new_links += self._add_candidate(pid, rid, {
+                "url": item["url"], "how": "agg", "via": via, "title": item.get("title"), "price": item.get("price"),
+                "new_shop": {"id": rid, "name": name, "domain": item["domain"], "found_by": via,
+                             "country": STATE.get("country", "be")}})
         allowed = set(self.shops_for(pid)) | {r for r in AUTO_SHOPS if r in self.retailers}
         for rid, items in by_shop.items():
             if rid not in allowed:
@@ -1813,34 +1808,141 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if not cands:
                 continue
             item = next((i for i in cands if i["url"]), cands[0])
+            via = item.get("css") or item.get("finder")
             o = offers.get(rid)
-            if item["url"] is None:                        # a click-out: the shop's price by its name, no address
-                o = offers.setdefault(rid, {"history": [], "found": now, "found_via": "agg", "link_status": "unknown",
-                                            "link_reason": T("price from a price-comparison site; the shop's own page is not known yet")})
-                o["finder_price"] = {"price": item["price"], "via": item.get("css") or item.get("finder"), "ts": now, "url": None}
-                if (not o.get("url") or not o.get("available")) and not o.get("manual_price"):
+            if o and (o.get("url") and item["url"] and url_key(rid, o["url"]) == url_key(rid, item["url"])
+                      or (not o.get("url") and item["url"] is None)):
+                # a confirmed page (or a confirmed comparison-site price): its price follows the comparison site
+                o["finder_price"] = {"price": item["price"], "via": via, "ts": now, "url": item["url"]}
+                if not o.get("manual_price") and (not o.get("available") or (o.get("last_via") or "").startswith("css:")):
                     record_price(o, item["price"])
-                    o["last_via"] = "css:" + o["finder_price"]["via"]
+                    o["last_via"] = "css:" + via
                 continue
-            if not o or not o.get("url"):
-                if url_key(rid, item["url"]) in rejected:
-                    continue
-                o = offers[rid] = {"url": item["url"], "history": [], "found": now, "found_via": "agg", "link_status": "unknown",
-                                   "link_reason": T("found through a price-comparison site; the shop's page is checked at the next price check")}
-                if item.get("title"):
-                    o["title"] = item["title"][:300]        # the comparison site's title, until the shop's own page is read
-                new_links += 1
-            elif url_key(rid, o["url"]) != url_key(rid, item["url"]):
-                continue                                   # another page of that shop: never mix their prices
-            o["finder_price"] = {"price": item["price"], "via": item.get("css") or item.get("finder"), "ts": now, "url": item["url"]}
-            if not o.get("available") and not o.get("manual_price"):
-                record_price(o, item["price"])
-                o["last_via"] = "css:" + o["finder_price"]["via"]
-            elif (o.get("last_via") or "").startswith("css:") and not o.get("manual_price"):
-                record_price(o, item["price"])            # still read through the comparison site: follow its price
-                o["last_via"] = "css:" + o["finder_price"]["via"]
+            if o and o.get("url"):
+                continue                                   # this shop has its confirmed page already
+            if item["url"] and url_key(rid, item["url"]) in rejected:
+                continue
+            new_links += self._add_candidate(pid, rid, {"url": item["url"], "how": "agg", "via": via, "title": item.get("title"),
+                                                        "price": item.get("price")})
         self.push_update()
         return new_links
+
+    # ----------------------------------------------------------------- finds to confirm
+    def _add_candidate(self, pid: str, rid: str, cand: dict[str, Any]) -> bool:
+        """A place where ARGUS met the product: it waits for your answer (is this the same item?) and counts for
+        nothing until you say yes. One find per shop at a time; a find you turned down is never asked again."""
+        offers = self.store["offers"].get(pid, {})
+        if (offers.get(rid) or {}).get("url"):
+            return False
+        rejected = set(self.store.get("rejected", {}).get(pid, []))
+        key = url_key(rid, cand["url"]) if cand.get("url") else f"#{rid}|{cand.get('via')}"
+        if key in rejected:
+            return False
+        waiting = self.store.setdefault("candidates", {}).setdefault(pid, {})
+        old = waiting.get(rid)
+        if old and old.get("key") != key:
+            if not (cand.get("sure") and not old.get("sure")):
+                return False                               # one at a time: the first answer first (a surer find wins)
+        now = time.time()
+        waiting[rid] = {**(old if old and old.get("key") == key else {}), **{k: v for k, v in cand.items() if v not in (None, "", [])},
+                        "key": key, "retailer": rid, "seen": now,
+                        "shop": (cand.get("new_shop") or {}).get("name") or RETAILERS.get(rid, (rid,))[0]}
+        waiting[rid].setdefault("found", now)
+        if not old or old.get("key") != key:
+            self.log("info", "discover", T("possible match at {shop}: waiting for your answer", shop=waiting[rid]["shop"]),
+                     product=pid, retailer=rid, url=cand.get("url"))
+            return True
+        return False
+
+    def candidates(self, pid: str | None = None) -> dict[str, dict[str, dict[str, Any]]]:
+        allc = self.store.get("candidates") or {}
+        return {pid: allc.get(pid) or {}} if pid else allc
+
+    async def notify_candidates(self, pid: str) -> None:
+        """One message per product with every new find (a push with buttons on your phone, and the list in the panel)."""
+        waiting = (self.store.get("candidates") or {}).get(pid) or {}
+        new = [c for c in waiting.values() if not c.get("notified")]
+        if not new:
+            return
+        for c in new:
+            c["notified"] = time.time()
+        await self.notifier.on_candidates(pid, new, len(waiting))
+        self.push_update()
+
+    def answer_candidate(self, pid: str, retailer: str | None, yes: bool, source: str = "panel") -> int:
+        """Your answer: yes = from now on this page (or comparison-site price) is watched, its price counts for the
+        charts, deals and alerts; no = never asked again for that page, and the shop is searched further.
+        retailer None: every find of the product."""
+        pid = normalize_product_id(pid)
+        waiting = (self.store.get("candidates") or {}).get(pid) or {}
+        rids = list(waiting) if retailer is None else [retailer]
+        done = 0
+        for rid in rids:
+            cand = waiting.pop(rid, None)
+            if not cand:
+                continue
+            done += 1
+            if not yes:
+                rej = self.store.setdefault("rejected", {}).setdefault(pid, [])
+                if cand["key"] not in rej:
+                    rej.append(cand["key"])
+                self.log("info", "link", T("not the same item at {shop}: never asked again", shop=cand["shop"]),
+                         product=pid, retailer=rid, url=cand.get("url"), source=source)
+                continue
+            if (ns := cand.get("new_shop")):
+                from .shops import set_auto_shops
+
+                auto = self.store.setdefault("auto_shops", {})
+                auto[rid] = {**ns, "categories": [], "added": time.time()}
+                set_auto_shops(list(auto.values()))
+                p = self.store["products"].get(pid, {})
+                if p.get("shops") and rid not in p["shops"]:
+                    p["shops"].append(rid)
+            offers = self.store["offers"].setdefault(pid, {})
+            old = offers.get(rid) or {}
+            o = offers[rid] = {**({k: old[k] for k in ("history", "manual_price", "finder_price") if k in old}),
+                               "url": cand.get("url"), "found": time.time(), "found_via": cand.get("how") or "search",
+                               "link_status": "confirmed", "link_reason": T("confirmed by you"),
+                               "title": cand.get("title"), "gtins": cand.get("gtins") or []}
+            o.setdefault("history", [])
+            if cand.get("price"):
+                if cand.get("via"):
+                    o["finder_price"] = {"price": cand["price"], "via": cand["via"], "ts": time.time(), "url": cand.get("url")}
+                record_price(o, cand["price"])
+                o["last_via"] = ("css:" + cand["via"]) if cand.get("via") else None
+                o["last_ok"] = o["last_checked"]
+            self.log("ok", "link", T("confirmed by you: {shop} is the same item; its price is watched from now on", shop=cand["shop"]),
+                     product=pid, retailer=rid, url=cand.get("url"), source=source)
+        if done:
+            self._learn_ean(pid)
+            if yes and self.entry and self.hass:
+                rids_ok = [r for r in rids if (self.store["offers"].get(pid, {}).get(r) or {}).get("url")]
+                if rids_ok:
+                    self.entry.async_create_background_task(self.hass, self.refresh_product(pid, rids_ok, source="confirmed"),
+                                                            f"{DOMAIN}_confirmed_{pid}")
+            self.push_update()
+        return done
+
+    def candidate_token(self, pid: str) -> str:
+        """A short random code for the buttons of a push message (so a button can't be guessed or replayed for another product)."""
+        import secrets
+
+        tokens = self.store.setdefault("candidate_tokens", {})
+        tok = secrets.token_hex(6)
+        tokens[tok] = {"product": pid, "ts": time.time()}
+        for k in [k for k, v in tokens.items() if time.time() - v.get("ts", 0) > 14 * 86400]:
+            del tokens[k]
+        return tok
+
+    def answer_token(self, action: str) -> int:
+        """A button of a push message: ARGUS_YES_<code> (every find of that message), ARGUS_NO_<code>."""
+        m = re.fullmatch(r"ARGUS_(YES|NO)_([0-9a-f]{12})", action or "")
+        if not m:
+            return 0
+        tok = (self.store.get("candidate_tokens") or {}).pop(m.group(2), None)
+        if not tok:
+            return 0
+        return self.answer_candidate(tok["product"], None, m.group(1) == "YES", source="push")
 
     @staticmethod
     def via_name(key: str | None) -> str:
@@ -1851,7 +1953,23 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return "?"
         return (CSS_SERVICES.get(key) or (None,))[0] or (FINDERS.get(key) or {}).get("name") or key
 
-    async def preview_product(self, url: str | None = None, name: str | None = None, ean: str | None = None) -> dict[str, Any]:
+    async def _read_page(self, rid: str, url: str, html: str | None = None) -> tuple[Parsed | None, str | None]:
+        """What a product page says (name, barcode, brand, model, price…): fetched, or from the page source you gave."""
+        if html:
+            parsed = parse_page(rid, html)
+            return (parsed, None) if (parsed.title or parsed.gtins or parsed.price) else (None, T("nothing readable in that page source"))
+        status, page, err = await self.fetcher.get_page(rid, url, force=True)
+        if err or not page:
+            return None, err or T("HTTP error {status}", status=status)
+        parsed = parse_page(rid, page)
+        if parsed.blocked:
+            return None, T("blocked (captcha / bot protection)")
+        if not (parsed.title or parsed.gtins):
+            return None, T("the page gave no product details (it is probably built with JavaScript)")
+        return parsed, None
+
+    async def preview_product(self, url: str | None = None, name: str | None = None, ean: str | None = None,
+                              html: str | None = None, details: dict[str, Any] | None = None) -> dict[str, Any]:
         """What ARGUS knows about a product before you add it: its identity (from the page, or looked up by name or
         barcode) and which of your shops it suggests to keep an eye on, judged by the kind of product."""
         if not ready():
@@ -1872,12 +1990,15 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             rid = retailer_from_url(url)
             if not rid:
                 raise LocalizedError("This address is not on one of your shops. Add the shop first (Manage → Shops & jobs), or import a shop settings file that has it.")
-            parsed, error = await self.fetcher.fetch_offer(rid, url, force=True)
+            parsed, error = await self._read_page(rid, url, html)
             ident = product_identity(parsed, url) if parsed else {"name": clean_title(slug_title(url).title())}
+            for key, val in (details or {}).items():       # what you filled in wins over what the page says
+                if val and key in ("name", "brand", "mpn", "sku", "ean"):
+                    ident[key] = normalize_gtin(val) if key == "ean" else str(val).strip()[:160]
             ident["pages"] = [{"retailer": rid, "url": url, "price": parsed.price if parsed else None,
                                "title": (parsed.title or "")[:200] if parsed else "", "gtins": list(parsed.gtins) if parsed else []}]
             ident["ean_sure"] = bool(ident.get("ean"))
-            if not ident.get("ean") and ident.get("name"):
+            if not ident.get("ean") and ident.get("name") and not error:
                 more = await self.fetcher.identify(ident["name"], None, ident.get("brand"))
                 if more.get("ean"):
                     ident["ean"], ident["ean_sure"] = more["ean"], more.get("ean_sure", False)
@@ -1901,8 +2022,10 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                           "found": bool(found.get(r)), "price": (found.get(r) or {}).get("price")})
         res = {"id": pid, "existing": pid in self.store["products"], "url": url or None, "retailer": rid, "error": error,
                "name": ident.get("name") or name, "brand": ident.get("brand"), "ean": ident.get("ean"), "ean_sure": ident.get("ean_sure", False),
-               "mpn": ident.get("mpn"), "image": ident.get("image"), "price": ident.get("price"), "category": category,
-               "pages": ident.get("pages") or [], "shops": shops}
+               "mpn": ident.get("mpn"), "sku": ident.get("sku"), "image": ident.get("image"), "price": ident.get("price"),
+               "category": category, "pages": ident.get("pages") or [], "shops": shops,
+               # the page couldn't be read, or too little is known to search surely: ask for details or the page source
+               "needs_details": bool(error) or not (ident.get("name") or name) or not (ident.get("ean") or ident.get("mpn"))}
         self._previews[pid] = (time.time(), res)
         return res
 
@@ -1953,7 +2076,7 @@ class ArgusCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         pid = normalize_product_id(pid)
         p = self._product(pid)
         for key, val in fields.items():
-            if key in ("name", "brand", "mpn", "notes"):
+            if key in ("name", "brand", "mpn", "sku", "notes"):
                 val = re.sub(r"\s+", " ", str(val or "")).strip()
                 if key == "name" and not val:
                     raise LocalizedError("A product needs a name.")
