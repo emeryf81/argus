@@ -274,8 +274,9 @@ class Notifier:
         it has buttons: Yes (all of them), No (none of them) and Open (the list in the panel, to answer one by one)."""
         p = self.store["products"].get(pid, {})
         name = p.get("name") or p.get("ean") or pid
-        lines = [f"• {c['shop']}: " + (f"€{c['price']:.2f}" if c.get("price") else tr("no price yet"))
-                 + (f" — {c['title'][:70]}" if c.get("title") else "") + (f"\n  {c['url']}" if c.get("url") else "")
+        plain = lambda x: re.sub(r"[\[\]<>`]", "", str(x))   # web-page text: no Markdown links or HTML in the message
+        lines = [f"• {plain(c['shop'])}: " + (f"€{c['price']:.2f}" if c.get("price") else tr("no price yet"))
+                 + (f" — {plain(c['title'][:70])}" if c.get("title") else "") + (f"\n  {plain(c['url'])}" if c.get("url") else "")
                  for c in new[:8]]
         if len(new) > 8:
             lines.append(tr("… and {n} more", n=len(new) - 8))
